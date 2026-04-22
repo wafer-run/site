@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target/
+/Cargo.lock
+
+# Node
+node_modules/
+dist/
+
+# Data (local SQLite + storage)
+data/
+.data/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+.playwright/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
