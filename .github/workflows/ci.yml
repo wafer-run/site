@@ -18,6 +18,18 @@ jobs:
         with:
           repository: wafer-run/wafer-run
           path: wafer-run
+      - name: Checkout solobase
+        uses: actions/checkout@v4
+        with:
+          repository: suppers-ai/solobase
+          path: solobase
+      - name: Set site env
+        run: |
+          echo "SUPPERS_AI__AUTH__JWT_SECRET=ci-test-secret-not-for-prod" >> $GITHUB_ENV
+          echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -45,6 +57,18 @@ jobs:
         with:
           repository: wafer-run/wafer-run
           path: wafer-run
+      - name: Checkout solobase
+        uses: actions/checkout@v4
+        with:
+          repository: suppers-ai/solobase
+          path: solobase
+      - name: Set site env
+        run: |
+          echo "SUPPERS_AI__AUTH__JWT_SECRET=ci-test-secret-not-for-prod" >> $GITHUB_ENV
+          echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install Node
