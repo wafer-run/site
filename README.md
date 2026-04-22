@@ -38,9 +38,9 @@ Required environment variables:
 Optional:
 
 - `WAFER_RUN__REGISTRY__STORAGE_KEY_PREFIX` — defaults to `registry`.
-- `SOLOBASE_INFRA__DB_PATH` — SQLite file path (defaults to `./data/site.db`).
-- `SOLOBASE_INFRA__STORAGE_ROOT` — local-storage root dir (defaults to `./data/storage`).
-- `SOLOBASE_INFRA__LISTEN` — bind address (defaults to `0.0.0.0:8090`).
+- `SOLOBASE_DB_PATH` — SQLite file path (defaults to `data/solobase.db`, per `solobase_native::InfraConfig`).
+- `SOLOBASE_STORAGE_ROOT` — local-storage root dir (defaults to `data/storage`).
+- `SOLOBASE_LISTEN` — bind address (defaults to `0.0.0.0:8090`).
 
 GitHub is the only OAuth provider enabled. Google and Microsoft are disabled simply by not setting their credential triples (`SOLOBASE_SHARED__AUTH__{GOOGLE,MICROSOFT}__CLIENT_ID` etc.) — the auth block's provider registry only instantiates providers whose credentials are all present.
 
