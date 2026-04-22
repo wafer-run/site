@@ -1,18 +1,14 @@
 //! `wafer-run/registry` block — package registry for WAFER blocks.
 //!
-//! Task 4 registers a minimal stub so:
-//! - `/_inspector/blocks` lists `wafer-run/registry`.
-//! - `/registry` routes resolve (currently 501 until Task 6).
-//!
-//! Task 6 replaces the body with real `BlockInfo`, dispatch handlers,
-//! routes, and data models.
+//! Task 6 scaffolds the block structure with route dispatch and stub handlers.
+//! Real handler implementations land in Tasks 7–14.
+
+pub mod handlers;
+pub mod models;
+pub mod routes;
 
 use std::sync::Arc;
-
-use wafer_run::{
-    Block, BlockCategory, BlockInfo, Context, ErrorCode, InputStream, InstanceMode,
-    LifecycleEvent, Message, OutputStream, Wafer, WaferError,
-};
+use wafer_run::Wafer;
 
 /// Full block name. Owned by `wafer-run` per the `{org}/{block}` naming
 /// convention — this is the canonical WAFER package registry block.
@@ -33,58 +29,14 @@ pub struct RegistryConfig {
     pub storage_key_prefix: String,
 }
 
-/// Stub block — responds with `Unimplemented` until Task 6 lands.
-pub struct RegistryBlock {
-    _cfg: RegistryConfig,
-}
-
-impl RegistryBlock {
-    pub fn new(cfg: RegistryConfig) -> Self {
-        Self { _cfg: cfg }
-    }
-}
-
-#[async_trait::async_trait]
-impl Block for RegistryBlock {
-    fn info(&self) -> BlockInfo {
-        BlockInfo::new(
-            NAME,
-            "0.0.1",
-            "http-handler@v1",
-            "WAFER package registry (stub — Task 6 fills this in)",
-        )
-        .instance_mode(InstanceMode::Singleton)
-        .category(BlockCategory::Infrastructure)
-    }
-
-    async fn handle(&self, _ctx: &dyn Context, msg: Message, _input: InputStream) -> OutputStream {
-        OutputStream::error(WaferError {
-            code: ErrorCode::Unimplemented,
-            message: format!(
-                "wafer-run/registry stub — endpoint {} not implemented yet (Task 6+)",
-                msg.path()
-            ),
-            meta: vec![],
-        })
-    }
-
-    async fn lifecycle(
-        &self,
-        _ctx: &dyn Context,
-        _event: LifecycleEvent,
-    ) -> std::result::Result<(), WaferError> {
-        Ok(())
-    }
-}
-
-/// Register the `wafer-run/registry` stub. Task 6 replaces this with the
-/// real block wiring.
+/// Register the `wafer-run/registry` block with route dispatch.
 pub fn register(w: &mut Wafer, cfg: RegistryConfig) -> anyhow::Result<()> {
     tracing::debug!(
         admin_email = %cfg.admin_email,
         storage_key_prefix = %cfg.storage_key_prefix,
-        "registering wafer-run/registry stub"
+        "registering wafer-run/registry with route dispatch"
     );
-    w.register_block(NAME, Arc::new(RegistryBlock::new(cfg)))
+    let block = Arc::new(handlers::RegistryBlock::new(cfg));
+    w.register_block(NAME, block)
         .map_err(|e| anyhow::anyhow!("register {NAME}: {e}"))
 }
