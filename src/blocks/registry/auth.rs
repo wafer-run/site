@@ -77,31 +77,37 @@ pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser
         // session cookie.
     }
 
-    // 2. Delegate to suppers-ai/auth. Propagate cookie + authorization
-    //    headers via the same `http.header.*` meta keys the real HTTP
-    //    adapter uses — see `MigrationTestCtx`'s dispatch path in
-    //    solobase-core/tests/auth/block_dispatch.rs for the reference shape.
-    let mut auth_msg = Message::new(ServiceOp::AUTH_REQUIRE_USER);
-    auth_msg.set_meta("req.action", ServiceOp::AUTH_REQUIRE_USER);
+    // 2. Delegate to suppers-ai/auth via the HTTP endpoint `/b/auth/api/me`.
+    //    Solobase's auth block declares `http-handler@v1` as its interface,
+    //    which makes the runtime action-validator reject service-op names
+    //    like `auth.require_user`. `/b/auth/api/me` is in the block's
+    //    declared endpoints (action="retrieve") so it validates — and it
+    //    returns the same `{id, email}` shape we need in one call, saving
+    //    a subsequent `fetch_email` round-trip on the cookie-session path.
     let cookie = msg.header("cookie");
-    if !cookie.is_empty() {
-        auth_msg.set_meta("http.header.cookie", cookie);
+    if cookie.is_empty() {
+        return Err(unauthorized_response());
     }
-    if !auth_header.is_empty() {
-        auth_msg.set_meta("http.header.authorization", auth_header);
-    }
+    let mut me_msg = Message::new("");
+    me_msg.set_meta("req.action", "retrieve");
+    me_msg.set_meta("req.resource", "/b/auth/api/me");
+    me_msg.set_meta("http.header.cookie", cookie);
 
     let buf = ctx
-        .call_block_buffered("suppers-ai/auth", auth_msg, &[])
+        .call_block_buffered("suppers-ai/auth", me_msg, &[])
         .await
         .map_err(|_| unauthorized_response())?;
-    let uid: UserIdResponse =
-        serde_json::from_slice(&buf.body).map_err(|_| unauthorized_response())?;
 
-    let email = fetch_email(ctx, msg, &uid.user_id).await;
+    #[derive(Deserialize)]
+    struct MeResponse {
+        id: String,
+        email: String,
+    }
+    let me: MeResponse =
+        serde_json::from_slice(&buf.body).map_err(|_| unauthorized_response())?;
     Ok(AuthedUser {
-        id: uid.user_id,
-        email,
+        id: me.id,
+        email: me.email,
     })
 }
 

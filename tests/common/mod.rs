@@ -215,8 +215,15 @@ impl InMemoryCtx {
                     let cookie = msg.header("cookie");
                     if let Some(user_id) = parse_session_cookie(cookie) {
                         if let Some(email) = self.identities.get(&user_id) {
+                            // Flat {id, email, ...} shape — matches solobase's
+                            // real /b/auth/api/me response (see
+                            // crates/solobase-core/src/blocks/auth/handlers/me.rs).
                             let body = serde_json::to_vec(&json!({
-                                "user": { "email": email }
+                                "id": user_id,
+                                "email": email,
+                                "display_name": "",
+                                "role": "user",
+                                "orgs": []
                             }))
                             .unwrap();
                             return OutputStream::respond(body);
