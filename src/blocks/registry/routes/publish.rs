@@ -55,6 +55,11 @@ pub async fn post(
     };
 
     // 3. Tarball parse + validate.
+    //
+    // The wire body uses `Display`, not `Debug`, so 422s read as
+    // "version: empty pre-release segment" rather than
+    // `BadManifest("version: ...")` — the Rust variant name isn't part of
+    // the public contract.
     let t = match tarball::parse_and_validate(&bytes) {
         Ok(t) => t,
         Err(e) => {
@@ -62,7 +67,7 @@ pub async fn post(
                 e.status_code(),
                 &json!({
                     "error": "invalid-tarball",
-                    "message": format!("{e:?}"),
+                    "message": format!("{e}"),
                 }),
             );
         }

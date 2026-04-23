@@ -113,6 +113,43 @@ impl TarballError {
     }
 }
 
+/// Human-readable rendering for the 422/413 wire body.
+///
+/// Spec §4/§8 says the response identifies the offending field. We want
+/// `version: empty pre-release segment`, not
+/// `BadManifest("version: empty pre-release segment")` — so this impl
+/// strips the variant wrapper that `Debug` would expose.
+impl std::fmt::Display for TarballError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TarballError::TooLarge => {
+                write!(f, "archive exceeds the 20 MiB size cap")
+            }
+            TarballError::Decode(msg) => {
+                // `Decode` carries the underlying gzip/tar error verbatim.
+                // Safe to surface — it's already a short diagnostic string.
+                write!(f, "decode: {msg}")
+            }
+            TarballError::MissingManifest => {
+                write!(f, "wafer.toml is missing from the tarball")
+            }
+            TarballError::MissingWasm => {
+                write!(f, "no .wasm entry found in the tarball")
+            }
+            TarballError::MultipleWasm => {
+                write!(f, "multiple .wasm entries found; expected exactly one")
+            }
+            TarballError::OversizeWasm => {
+                write!(f, ".wasm entry exceeds the 16 MiB size cap")
+            }
+            TarballError::OversizeReadme => {
+                write!(f, "README.md exceeds the 1 MiB size cap")
+            }
+            TarballError::BadManifest(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 /// Parse a `.wafer` (gzipped tar) blob into an [`ExtractedTarball`].
 ///
 /// The hash is computed on the raw bytes before decompression — the stored
