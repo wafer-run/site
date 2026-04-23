@@ -3,6 +3,7 @@
 //! Task 6 scaffolds the block structure with route dispatch and stub handlers.
 //! Real handler implementations land in Tasks 7–14.
 
+pub mod db;
 pub mod handlers;
 pub mod models;
 pub mod routes;
