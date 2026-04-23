@@ -61,54 +61,91 @@ struct UserProfileResponse {
 ///
 /// Returns an `OutputStream` error response on any failure path so callers
 /// can early-return without additional shaping.
-pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser, OutputStream> {
-    // 1. Try bearer PAT against registry_tokens. The sha256+lookup lives in
-    //    `db::resolve_bearer` so the exchange endpoint and this gate share
-    //    one implementation — Task 12 centralized it there.
+pub async fn require_user(
+    ctx: &dyn Context,
+    msg: &Message,
+    cfg: &RegistryConfig,
+) -> Result<AuthedUser, OutputStream> {
+    // 1. Try bearer PAT against registry_tokens. This path handles PATs the
+    //    registry itself issued via CLI-login exchange (Task 12).
     let auth_header = msg.header("authorization");
     if let Some(token) = auth_header.strip_prefix("Bearer ") {
         if let Ok(Some((user_id, email))) = db::resolve_bearer(ctx, token).await {
-            // Email was captured at CLI-login exchange time and lives on the
-            // token row, so no cross-block profile fetch is needed here.
             return Ok(AuthedUser { id: user_id, email });
         }
-        // Fall through to auth-block delegation on None/Err — a mismatched
-        // or revoked PAT shouldn't hard-fail if the caller also has a valid
-        // session cookie.
+        // Fall through to JWT verification — a mismatched PAT might be a
+        // solobase-minted JWT.
     }
 
-    // 2. Delegate to suppers-ai/auth via the HTTP endpoint `/b/auth/api/me`.
-    //    Solobase's auth block declares `http-handler@v1` as its interface,
-    //    which makes the runtime action-validator reject service-op names
-    //    like `auth.require_user`. `/b/auth/api/me` is in the block's
-    //    declared endpoints (action="retrieve") so it validates — and it
-    //    returns the same `{id, email}` shape we need in one call, saving
-    //    a subsequent `fetch_email` round-trip on the cookie-session path.
+    // 2. Try solobase's JWT. Solobase's OAuth callback sets the signed JWT
+    //    as `auth_token` cookie (or passes it as `Authorization: Bearer`).
+    //    Solobase's runtime router does JWT verification transparently for
+    //    `/b/**` routes via `extract_auth_meta`, but our `/registry/**` flow
+    //    bypasses the router, so we verify here. Uses solobase's own crypto
+    //    helpers to stay consistent with the signing key derivation.
+    let jwt_token = find_jwt_token(msg);
+    if let Some(token) = jwt_token {
+        if let Some(claims) = verify_jwt(&token, &cfg.jwt_secret) {
+            let sub = claims
+                .get("sub")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let email = claims
+                .get("email")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if !sub.is_empty() {
+                return Ok(AuthedUser {
+                    id: sub.to_string(),
+                    email: email.to_string(),
+                });
+            }
+        }
+    }
+
+    Err(unauthorized_response())
+}
+
+/// Find a JWT in the request — either the Authorization Bearer header or
+/// the `auth_token` cookie that solobase's OAuth callback sets.
+fn find_jwt_token(msg: &Message) -> Option<String> {
+    let auth_header = msg.header("authorization");
+    if let Some(t) = auth_header.strip_prefix("Bearer ") {
+        if !t.is_empty() {
+            return Some(t.to_string());
+        }
+    }
     let cookie = msg.header("cookie");
-    if cookie.is_empty() {
-        return Err(unauthorized_response());
+    for part in cookie.split(';') {
+        if let Some(v) = part.trim().strip_prefix("auth_token=") {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
     }
-    let mut me_msg = Message::new("");
-    me_msg.set_meta("req.action", "retrieve");
-    me_msg.set_meta("req.resource", "/b/auth/api/me");
-    me_msg.set_meta("http.header.cookie", cookie);
+    None
+}
 
-    let buf = ctx
-        .call_block_buffered("suppers-ai/auth", me_msg, &[])
-        .await
-        .map_err(|_| unauthorized_response())?;
-
-    #[derive(Deserialize)]
-    struct MeResponse {
-        id: String,
-        email: String,
+/// Verify a JWT against solobase's auth-block derived key, with fallback to
+/// the master secret. Mirrors `solobase_core::crypto::extract_auth_meta`
+/// except we return the claims map instead of mutating message meta.
+fn verify_jwt(token: &str, jwt_secret: &str) -> Option<std::collections::HashMap<String, serde_json::Value>> {
+    let derived = solobase_core::crypto::derive_block_jwt_key(
+        jwt_secret,
+        "suppers-ai/auth",
+    );
+    if let Ok(claims) = solobase_core::crypto::jwt_verify(token, &derived) {
+        if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
+            return Some(claims);
+        }
     }
-    let me: MeResponse =
-        serde_json::from_slice(&buf.body).map_err(|_| unauthorized_response())?;
-    Ok(AuthedUser {
-        id: me.id,
-        email: me.email,
-    })
+    if let Ok(claims) = solobase_core::crypto::jwt_verify(token, jwt_secret) {
+        if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
+            return Some(claims);
+        }
+    }
+    None
 }
 
 /// Best-effort profile lookup for the email. Returns `""` on any failure —
@@ -179,7 +216,7 @@ pub async fn require_admin(
     msg: &Message,
     cfg: &RegistryConfig,
 ) -> Result<AuthedUser, OutputStream> {
-    let user = require_user(ctx, msg).await?;
+    let user = require_user(ctx, msg, cfg).await?;
     if !user.email.is_empty() && user.email.eq_ignore_ascii_case(&cfg.admin_email) {
         return Ok(user);
     }

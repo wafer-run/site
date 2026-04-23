@@ -100,7 +100,10 @@ pub async fn run() -> anyhow::Result<()> {
     );
 
     // 4b. Registry block stub.
+    let jwt_secret = std::env::var("SUPPERS_AI__AUTH__JWT_SECRET")
+        .expect("SUPPERS_AI__AUTH__JWT_SECRET required");
     let registry_cfg = blocks::registry::RegistryConfig {
+        jwt_secret: jwt_secret.clone(),
         admin_email: std::env::var("WAFER_RUN__REGISTRY__ADMIN_EMAIL")
             .expect("WAFER_RUN__REGISTRY__ADMIN_EMAIL required"),
         storage_key_prefix: std::env::var("WAFER_RUN__REGISTRY__STORAGE_KEY_PREFIX")

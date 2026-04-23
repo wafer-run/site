@@ -15,7 +15,7 @@ use crate::blocks::registry::{auth, routes::resp, RegistryConfig};
 
 /// `GET /registry/api/me` — identity + admin flag for the caller.
 pub async fn get(ctx: &dyn Context, msg: &Message, cfg: &RegistryConfig) -> OutputStream {
-    match auth::require_user(ctx, msg).await {
+    match auth::require_user(ctx, msg, cfg).await {
         Ok(u) => resp::ok_json(&json!({
             "email": u.email,
             "is_admin": !u.email.is_empty() && u.email.eq_ignore_ascii_case(&cfg.admin_email),

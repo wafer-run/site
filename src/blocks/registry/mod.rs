@@ -31,6 +31,13 @@ pub struct RegistryConfig {
     /// Top-level storage key prefix for registry tarballs. Defaults to
     /// `"registry"`.
     pub storage_key_prefix: String,
+
+    /// Shared JWT secret — same value solobase's auth block uses to mint
+    /// OAuth JWTs. Needed so `require_user` can verify `auth_token` cookies
+    /// end-to-end. Solobase's runtime router does this transparently for
+    /// `/b/**` routes, but `/registry/**` is routed directly from our
+    /// site-main flow and bypasses that middleware.
+    pub jwt_secret: String,
 }
 
 /// Register the `wafer-run/registry` block with route dispatch.

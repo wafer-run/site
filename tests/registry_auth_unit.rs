@@ -26,6 +26,14 @@ use wafer_site::blocks::registry::{
     RegistryConfig,
 };
 
+fn test_cfg() -> RegistryConfig {
+    RegistryConfig {
+        admin_email: "admin@example.com".into(),
+        storage_key_prefix: "registry".into(),
+        jwt_secret: "test-secret".into(),
+    }
+}
+
 /// Reads the HTTP status code out of an `OutputStream` by draining it —
 /// mirrors what the real HTTP adapter does with `META_RESP_STATUS`.
 async fn status_of(out: OutputStream) -> u16 {
@@ -82,7 +90,7 @@ async fn bearer_pat_resolves_against_registry_tokens() {
     msg.set_meta("http.header.authorization", format!("Bearer {raw}"));
 
     // `OutputStream` isn't `Debug`, so we can't use `.expect`.
-    let Ok(user) = require_user(ctx.as_ref(), &msg).await else {
+    let Ok(user) = require_user(ctx.as_ref(), &msg, &test_cfg()).await else {
         panic!("bearer PAT resolves to AuthedUser");
     };
     assert_eq!(user.id, "u1");
@@ -110,7 +118,7 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
     let cfg = RegistryConfig {
         admin_email: "admin@example.com".into(),
         storage_key_prefix: "registry".into(),
-    };
+     jwt_secret: "test-secret".into(),};
 
     let mut msg = Message::new("retrieve");
     msg.set_meta("http.header.authorization", format!("Bearer {raw}"));
@@ -137,7 +145,7 @@ async fn missing_credentials_delegates_to_auth_block_and_returns_401() {
     let ctx = common::boot_registry_against_memory().await;
 
     let msg = Message::new("retrieve");
-    let Err(err_out) = require_user(ctx.as_ref(), &msg).await else {
+    let Err(err_out) = require_user(ctx.as_ref(), &msg, &test_cfg()).await else {
         panic!("no creds should not resolve");
     };
 

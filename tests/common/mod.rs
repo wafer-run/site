@@ -271,7 +271,7 @@ pub async fn boot_registry_against_memory() -> Arc<InMemoryCtx> {
     let cfg = RegistryConfig {
         admin_email: "test@example.invalid".into(),
         storage_key_prefix: "registry".into(),
-    };
+     jwt_secret: "test-secret".into(),};
     let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
 
     block
@@ -377,7 +377,7 @@ async fn start_with(
     let cfg = RegistryConfig {
         admin_email: admin_email.into(),
         storage_key_prefix: "registry".into(),
-    };
+     jwt_secret: "test-secret".into(),};
     let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
 
     // Mirror `RegistryBlock::lifecycle(Init)` as run by the WAFER runtime's
@@ -466,25 +466,43 @@ pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
 /// PAT-lookup shortcut. That's the branch the admin actually hits in
 /// production when they open `/registry/cli-login` in a browser.
 pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
-    // The stub matches the cookie value against identity keys verbatim,
-    // so both sides agree on `"admin-user-id"`.
+    // Mint a signed JWT that `registry::auth::require_user` will verify
+    // against the configured jwt_secret ("test-secret" in the test harness;
+    // see the `TEST_JWT_SECRET` const below). Shape matches what solobase
+    // puts on `auth_token` after OAuth — {sub, email, type:"access", exp}.
     let admin_id = "admin-user-id".to_string();
     let mut identities = HashMap::new();
     identities.insert(admin_id.clone(), admin_email.to_string());
     let (mut app, _ctx) = start_with(admin_email, identities).await;
 
-    // Swap the default client for one that pins the session cookie.
+    let jwt = sign_test_jwt(&admin_id, admin_email);
     let mut default_headers = reqwest::header::HeaderMap::new();
     default_headers.insert(
         reqwest::header::COOKIE,
-        reqwest::header::HeaderValue::from_str(&format!("session={admin_id}"))
-            .expect("session cookie header"),
+        reqwest::header::HeaderValue::from_str(&format!("auth_token={jwt}"))
+            .expect("auth_token cookie header"),
     );
     app.client = reqwest::Client::builder()
         .default_headers(default_headers)
         .build()
         .expect("build cookie client");
     app
+}
+
+/// Shared JWT secret the test harness configures on `RegistryConfig`.
+pub const TEST_JWT_SECRET: &str = "test-secret";
+
+/// Mint a JWT of the same shape solobase's auth block issues on OAuth
+/// callback — signed with the block-derived key so `require_user`'s
+/// primary verification path succeeds.
+pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
+    use std::time::Duration;
+    let mut claims = HashMap::new();
+    claims.insert("sub".to_string(), json!(user_id));
+    claims.insert("email".to_string(), json!(email));
+    claims.insert("type".to_string(), json!("access"));
+    let key = solobase_core::crypto::derive_block_jwt_key(TEST_JWT_SECRET, "suppers-ai/auth");
+    solobase_core::crypto::jwt_sign(&claims, Duration::from_secs(3600), &key)
 }
 
 /// Start the site with both an admin identity *and* a non-admin identity
