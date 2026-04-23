@@ -102,6 +102,20 @@ pub fn not_found(what: &str) -> Markup {
     })
 }
 
+/// CLI login device-code display.
+///
+/// Admin-only: rendered after `require_admin` passes and a fresh code has
+/// been issued via `db::issue_cli_code`. The `<pre>` wrapping makes copying
+/// the 64-hex-char code trivial; `.subtle` dims the single-use reminder.
+pub fn cli_login_code(code: &str) -> Markup {
+    layout("CLI Login", html! {
+        h1 { "CLI Login" }
+        p { "Paste this code into your CLI prompt. Valid for 15 minutes." }
+        pre.cli-code { code { (code) } }
+        p.subtle { "This code is single-use." }
+    })
+}
+
 /// Coming soon placeholder (used by Task 11).
 pub fn coming_soon() -> Markup {
     layout("Coming Soon", html! {

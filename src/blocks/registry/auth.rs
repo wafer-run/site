@@ -16,8 +16,6 @@
 //! `wafer_core::clients::database::get_by_field`.
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use wafer_core::clients::database as wcdb;
 use wafer_run::{common::ServiceOp, context::Context, types::Message, OutputStream};
 
 use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
@@ -64,40 +62,18 @@ struct UserProfileResponse {
 /// Returns an `OutputStream` error response on any failure path so callers
 /// can early-return without additional shaping.
 pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser, OutputStream> {
-    // 1. Try bearer PAT against registry_tokens.
+    // 1. Try bearer PAT against registry_tokens. The sha256+lookup lives in
+    //    `db::resolve_bearer` so the exchange endpoint and this gate share
+    //    one implementation — Task 12 centralized it there.
     let auth_header = msg.header("authorization");
     if let Some(token) = auth_header.strip_prefix("Bearer ") {
-        let hash = hex::encode(Sha256::digest(token.as_bytes()));
-        match wcdb::get_by_field(ctx, db::TOKENS, "hash", serde_json::json!(hash)).await {
-            Ok(row) => {
-                let revoked = row
-                    .data
-                    .get("revoked_at")
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.is_empty())
-                    .unwrap_or(false);
-                if !revoked {
-                    let user_id = row
-                        .data
-                        .get("user_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    if !user_id.is_empty() {
-                        let email = fetch_email(ctx, &user_id).await;
-                        return Ok(AuthedUser { id: user_id, email });
-                    }
-                }
-                // Fall through to auth-block delegation — a mismatched /
-                // revoked row shouldn't hard-fail if the caller also has a
-                // valid session cookie.
-            }
-            Err(_) => {
-                // Not found, or backend error. Fall through — the
-                // auth-block path will produce the authoritative 401 if
-                // there is no session cookie either.
-            }
+        if let Ok(Some(user_id)) = db::resolve_bearer(ctx, token).await {
+            let email = fetch_email(ctx, &user_id).await;
+            return Ok(AuthedUser { id: user_id, email });
         }
+        // Fall through to auth-block delegation on None/Err — a mismatched
+        // or revoked PAT shouldn't hard-fail if the caller also has a valid
+        // session cookie.
     }
 
     // 2. Delegate to suppers-ai/auth. Propagate cookie + authorization

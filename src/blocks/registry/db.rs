@@ -5,9 +5,12 @@
 //! extend this module with query helpers as routes come online.
 
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
+use rand::RngCore;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use wafer_core::clients::database::{self as db, Filter, FilterOp, ListOptions, Record, SortField};
 use wafer_run::context::Context;
 
@@ -356,6 +359,186 @@ pub async fn get_version(
             .map(String::from),
         published_at: field_i64(&r.data, "published_at").unwrap_or(0),
     }))
+}
+
+// ---- CLI login + token helpers --------------------------------------------
+//
+// Task 12: the CLI-login flow issues a short-lived "device code" on the
+// admin-gated `/registry/cli-login` page. The CLI exchanges that code for a
+// long-lived personal access token (PAT). Both the code and the PAT live in
+// collections managed by this block (`CODES` and `TOKENS`) — no raw SQL,
+// everything goes through the typed `db::*` API.
+
+/// Current time as seconds since epoch. Datetime fields on `CollectionSchema`
+/// round-trip as integers in SQLite today (stored as TEXT but decoded by
+/// `field_i64`), so storing `i64` here keeps reads simple.
+pub fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Sha256-hex of `input` — shared between `exchange_cli_code` (hashing the
+/// token for storage) and `resolve_bearer` (hashing the presented token for
+/// lookup).
+fn sha256_hex(input: &str) -> String {
+    hex::encode(Sha256::digest(input.as_bytes()))
+}
+
+/// Issue a new CLI-login device code for `user_id`. Returns the raw 64-char
+/// hex code; caller displays it to the admin who pastes it into the CLI.
+///
+/// Codes are single-use and expire 15 minutes after issuance. The unused /
+/// unexpired check runs in [`exchange_cli_code`].
+pub async fn issue_cli_code(ctx: &dyn Context, user_id: &str) -> Result<String> {
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let code = hex::encode(buf);
+    let now = now_unix();
+    let expires = now + 15 * 60;
+
+    let mut data: HashMap<String, serde_json::Value> = HashMap::new();
+    data.insert("code".into(), json!(code));
+    data.insert("user_id".into(), json!(user_id));
+    data.insert("expires_at".into(), json!(expires));
+    // Declare `used_at` explicitly as null at issuance. The sqlite service's
+    // auto-table-creation path (`ensure_table`) builds columns from the keys
+    // of the first-inserted row; if we omit `used_at` here, the column
+    // doesn't exist when `exchange_cli_code` later tries to update it and
+    // sqlite's UPDATE errors with "no such column". Inserting a null value
+    // ensures the column is present from the start. Unrelated to the
+    // `CollectionSchema` declared on the block — the schema only applies
+    // when a manifest-driven runtime materializes it, which our in-memory
+    // test harness skips.
+    data.insert("used_at".into(), serde_json::Value::Null);
+
+    db::create(ctx, CODES, data)
+        .await
+        .map_err(|e| anyhow::anyhow!("issue_cli_code: {e:?}"))?;
+
+    Ok(code)
+}
+
+/// Exchange a device `code` for a newly-minted PAT.
+///
+/// Returns:
+/// - `Ok(Some((user_id, token_plain)))` on success. `token_plain` is the raw
+///   PAT (`wafer_pat_<64hex>`) — the caller must surface it to the client
+///   since the hash is all we persist.
+/// - `Ok(None)` when the code is missing, expired, or already used — a flat
+///   "invalid" signal so the route doesn't leak which condition tripped.
+/// - `Err(...)` only for backend errors.
+pub async fn exchange_cli_code(
+    ctx: &dyn Context,
+    code: &str,
+) -> Result<Option<(String, String)>> {
+    let now = now_unix();
+
+    // Look up the code row. Absent code => Ok(None). `get_by_field` maps
+    // "not found" to `NotFound`, which we squash to `None`.
+    let row = match db::get_by_field(ctx, CODES, "code", json!(code)).await {
+        Ok(r) => r,
+        Err(ref e) if is_not_found(e) => return Ok(None),
+        Err(e) => return Err(anyhow::anyhow!("exchange_cli_code lookup: {e:?}")),
+    };
+
+    // Expired or already used?
+    let expires_at = field_i64(&row.data, "expires_at").unwrap_or(0);
+    let already_used = row
+        .data
+        .get("used_at")
+        .map(|v| match v {
+            serde_json::Value::Null => false,
+            serde_json::Value::String(s) => !s.is_empty(),
+            _ => true,
+        })
+        .unwrap_or(false);
+    if expires_at < now || already_used {
+        return Ok(None);
+    }
+
+    let user_id = row
+        .data
+        .get("user_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if user_id.is_empty() {
+        // Shouldn't happen (user_id is required on the schema), but surface
+        // it as "invalid" rather than minting a PAT for nobody.
+        return Ok(None);
+    }
+
+    // Mint the PAT.
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let token_plain = format!("wafer_pat_{}", hex::encode(buf));
+    let token_hash = sha256_hex(&token_plain);
+
+    // Mark the code as used first. The typed API updates by `id`, not by the
+    // `code` field — we use the row we already fetched.
+    let mut code_update: HashMap<String, serde_json::Value> = HashMap::new();
+    code_update.insert("used_at".into(), json!(now));
+    db::update(ctx, CODES, &row.id, code_update)
+        .await
+        .map_err(|e| anyhow::anyhow!("exchange_cli_code mark-used: {e:?}"))?;
+
+    // Insert the token row. Store the hash, not the raw PAT.
+    let mut tok_data: HashMap<String, serde_json::Value> = HashMap::new();
+    tok_data.insert("user_id".into(), json!(user_id));
+    tok_data.insert("name".into(), json!("wafer-cli"));
+    tok_data.insert("hash".into(), json!(token_hash));
+    // `last_used_at` + `revoked_at` left unset.
+    db::create(ctx, TOKENS, tok_data)
+        .await
+        .map_err(|e| anyhow::anyhow!("exchange_cli_code create-token: {e:?}"))?;
+
+    Ok(Some((user_id, token_plain)))
+}
+
+/// Resolve a raw bearer token to its owning `user_id`.
+///
+/// Sha256s the presented token, looks up the `TOKENS` collection by `hash`,
+/// and returns the `user_id` if the row exists and isn't revoked. Any
+/// missing / revoked / backend-error case squashes to `Ok(None)` so the
+/// caller can fall through to the next auth strategy without branching on
+/// error kinds.
+///
+/// Replaces the inline sha256+lookup that `auth::require_user` used before
+/// Task 12. Centralizing here means any future token shape change (rotation,
+/// last-used bookkeeping) lands in one place.
+pub async fn resolve_bearer(ctx: &dyn Context, token_plain: &str) -> Result<Option<String>> {
+    let hash = sha256_hex(token_plain);
+    match db::get_by_field(ctx, TOKENS, "hash", json!(hash)).await {
+        Ok(row) => {
+            let revoked = row
+                .data
+                .get("revoked_at")
+                .map(|v| match v {
+                    serde_json::Value::Null => false,
+                    serde_json::Value::String(s) => !s.is_empty(),
+                    _ => true,
+                })
+                .unwrap_or(false);
+            if revoked {
+                return Ok(None);
+            }
+            let user_id = row
+                .data
+                .get("user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            if user_id.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(user_id))
+            }
+        }
+        Err(ref e) if is_not_found(e) => Ok(None),
+        Err(e) => Err(anyhow::anyhow!("resolve_bearer: {e:?}")),
+    }
 }
 
 fn version_summary_from_record(r: Record) -> VersionSummary {
