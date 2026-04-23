@@ -22,7 +22,6 @@
 //! enough for `reqwest::multipart::Form` bodies, which is what both the CLI
 //! and our own tests generate.
 
-use base64::Engine as _;
 use serde_json::json;
 use wafer_run::{Context, InputStream, Message, OutputStream};
 
@@ -150,10 +149,6 @@ pub async fn post(
             wafer_core::clients::storage::delete(ctx, folder, &storage_key).await;
         return resp::internal(&format!("db insert: {e}"));
     }
-
-    // Keep `base64` in the compile graph — the CLI uses it for local
-    // signing, and the silent trim otherwise surprises `cargo hack`.
-    let _ = base64::engine::general_purpose::STANDARD.encode(b"");
 
     resp::ok_json(&json!({
         "package": format!("{}/{}", t.wafer_toml.package.org, t.wafer_toml.package.name),
