@@ -143,11 +143,16 @@ impl Context for InMemoryCtx {
 impl InMemoryCtx {
     /// Minimal `suppers-ai/auth` stub.
     ///
-    /// - `auth.require_user` — always errors. Tests exercise PAT-based
-    ///   auth, which runs *before* the auth-block fallback in
-    ///   `registry::auth::require_user`. Having the stub error here makes
-    ///   the "missing/bad PAT" path return the right 401 — if the stub
-    ///   succeeded, the gate would admit anonymous requests.
+    /// - `auth.require_user` — honors the session-cookie convention
+    ///   `Cookie: session=<user_id>`. When the incoming `http.header.cookie`
+    ///   meta carries `session=<id>` and `<id>` is present in
+    ///   `identities`, return `{"user_id": "<id>"}`. Every other shape
+    ///   (no cookie, unknown user, other cookie values) surfaces as
+    ///   `Unauthenticated`. This keeps the PAT-based path (which runs
+    ///   *before* the auth-block fallback in
+    ///   `registry::auth::require_user`) the primary credential in
+    ///   existing tests while letting a new cookie-branch test exercise
+    ///   the session flow end-to-end.
     ///
     /// - `auth.user_profile` — decodes `{"user_id": "..."}` from the body
     ///   and returns the matching seeded email, or empty when unknown.
@@ -162,10 +167,27 @@ impl InMemoryCtx {
         let action = msg.kind.clone();
         let body_bytes = input.collect_to_bytes().await;
         match action.as_str() {
-            "auth.require_user" => OutputStream::error(WaferError::new(
-                wafer_run::types::ErrorCode::Unauthenticated,
-                "auth stub: no session-cookie support".to_string(),
-            )),
+            "auth.require_user" => {
+                // `registry::auth::require_user` copies the HTTP cookie
+                // header onto `http.header.cookie` before dispatching to
+                // the auth block; `Message::header("cookie")` reads it
+                // back via the same convention. Parse
+                // `session=<user_id>` out of it and match against the
+                // seeded identity map.
+                let cookie = msg.header("cookie");
+                let user_id = parse_session_cookie(cookie);
+                match user_id.filter(|id| self.identities.contains_key(id.as_str())) {
+                    Some(id) => {
+                        let body =
+                            serde_json::to_vec(&json!({ "user_id": id })).unwrap();
+                        OutputStream::respond(body)
+                    }
+                    None => OutputStream::error(WaferError::new(
+                        wafer_run::types::ErrorCode::Unauthenticated,
+                        "auth stub: missing or unknown session cookie".to_string(),
+                    )),
+                }
+            }
             "auth.user_profile" => {
                 #[derive(serde::Deserialize)]
                 struct Req {
@@ -191,6 +213,25 @@ impl InMemoryCtx {
             )),
         }
     }
+}
+
+/// Parse a `session=<value>` token out of an RFC 6265 `Cookie` header.
+/// Returns `None` when the header is empty or no `session=...` segment is
+/// present. Extra cookies on the line are ignored.
+fn parse_session_cookie(raw: &str) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+    for part in raw.split(';') {
+        let part = part.trim();
+        if let Some(v) = part.strip_prefix("session=") {
+            let v = v.trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Construct the registry block with a minimal config and dispatch
@@ -385,6 +426,36 @@ pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
     let raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
     seed_token(ctx.as_ref(), &admin_id, &raw).await;
     app.admin_token = raw;
+    app
+}
+
+/// Start the site with an admin identity seeded and the reqwest client
+/// configured to send `Cookie: session=admin-user-id` on every request.
+///
+/// Unlike [`start_test_site_with_admin`], this variant doesn't mint a PAT
+/// — the cookie is the credential, so `registry::auth::require_user`
+/// routes through the `suppers-ai/auth` session branch rather than the
+/// PAT-lookup shortcut. That's the branch the admin actually hits in
+/// production when they open `/registry/cli-login` in a browser.
+pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
+    // The stub matches the cookie value against identity keys verbatim,
+    // so both sides agree on `"admin-user-id"`.
+    let admin_id = "admin-user-id".to_string();
+    let mut identities = HashMap::new();
+    identities.insert(admin_id.clone(), admin_email.to_string());
+    let (mut app, _ctx) = start_with(admin_email, identities).await;
+
+    // Swap the default client for one that pins the session cookie.
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    default_headers.insert(
+        reqwest::header::COOKIE,
+        reqwest::header::HeaderValue::from_str(&format!("session={admin_id}"))
+            .expect("session cookie header"),
+    );
+    app.client = reqwest::Client::builder()
+        .default_headers(default_headers)
+        .build()
+        .expect("build cookie client");
     app
 }
 
