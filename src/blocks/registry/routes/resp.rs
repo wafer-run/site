@@ -86,7 +86,7 @@ pub fn internal(message: &str) -> OutputStream {
 }
 
 /// Build an HTML response with an explicit HTTP status.
-fn html_response(status: u16, body: &str) -> OutputStream {
+pub fn html_response(status: u16, body: &str) -> OutputStream {
     OutputStream::respond_with_meta(
         body.as_bytes().to_vec(),
         vec![
