@@ -57,10 +57,18 @@ pub struct WaferPackage {
 
 /// Result of a successful parse + validate. Owned — the archive is consumed
 /// in the process.
+///
+/// Note: the `.wasm` entry is validated (presence, uniqueness, size cap) but
+/// **not** retained. The raw gzipped tarball is stored as-is via
+/// `storage::put` at the publish callsite, so there is no need to keep a
+/// second decompressed copy in memory.
 #[derive(Debug)]
 pub struct ExtractedTarball {
     pub wafer_toml: WaferToml,
-    pub wasm_bytes: Vec<u8>,
+    /// Decompressed length (bytes) of the validated `.wasm` entry. Retained
+    /// for diagnostics / future use; the bytes themselves are discarded once
+    /// the size cap has been enforced.
+    pub wasm_size_bytes: usize,
     pub readme_md: Option<String>,
     /// Hex-encoded SHA256 of the *gzipped* tar bytes (what the client
     /// uploaded). Callers store this verbatim.
@@ -117,7 +125,11 @@ pub fn parse_and_validate(bytes: &[u8]) -> Result<ExtractedTarball, TarballError
 
     let mut archive = Archive::new(GzDecoder::new(bytes));
     let mut wafer_toml: Option<WaferToml> = None;
-    let mut wasm_bytes: Option<Vec<u8>> = None;
+    // Track whether we've seen a `.wasm` entry and, if so, its decompressed
+    // size. The bytes themselves are dropped after the size-cap check — the
+    // publish flow persists the raw gzipped archive, not the decompressed
+    // payload, so retaining a second copy is pure memory waste.
+    let mut wasm_size: Option<usize> = None;
     let mut readme: Option<String> = None;
 
     let entries = archive
@@ -155,18 +167,20 @@ pub fn parse_and_validate(bytes: &[u8]) -> Result<ExtractedTarball, TarballError
                 readme = Some(s);
             }
             p if p.ends_with(".wasm") => {
-                if wasm_bytes.is_some() {
+                if wasm_size.is_some() {
                     return Err(TarballError::MultipleWasm);
                 }
-                // Same gzip-bomb guard as README.
-                let mut take = entry.take(MAX_WASM_BYTES as u64 + 1);
-                let mut buf = Vec::new();
-                take.read_to_end(&mut buf)
-                    .map_err(|e| TarballError::Decode(e.to_string()))?;
-                if buf.len() > MAX_WASM_BYTES {
+                // Same gzip-bomb guard as README. We stream the entry
+                // through a discarding sink so we can enforce the size cap
+                // without materializing the bytes — the raw gzipped tarball
+                // (passed in) is what gets persisted, not this decompressed
+                // copy.
+                let take = entry.take(MAX_WASM_BYTES as u64 + 1);
+                let size = read_size(take).map_err(|e| TarballError::Decode(e.to_string()))?;
+                if size > MAX_WASM_BYTES {
                     return Err(TarballError::OversizeWasm);
                 }
-                wasm_bytes = Some(buf);
+                wasm_size = Some(size);
             }
             _ => {
                 // Silently ignore other files. Intentionally permissive so
@@ -177,17 +191,33 @@ pub fn parse_and_validate(bytes: &[u8]) -> Result<ExtractedTarball, TarballError
     }
 
     let wafer_toml = wafer_toml.ok_or(TarballError::MissingManifest)?;
-    let wasm_bytes = wasm_bytes.ok_or(TarballError::MissingWasm)?;
+    let wasm_size_bytes = wasm_size.ok_or(TarballError::MissingWasm)?;
 
     validate_manifest(&wafer_toml)?;
 
     Ok(ExtractedTarball {
         wafer_toml,
-        wasm_bytes,
+        wasm_size_bytes,
         readme_md: readme,
         sha256,
         size_bytes: bytes.len(),
     })
+}
+
+/// Drain `r` and return the number of bytes read, without retaining them.
+/// Used to enforce size caps on tarball entries whose bytes are not needed
+/// downstream.
+fn read_size<R: Read>(mut r: R) -> std::io::Result<usize> {
+    let mut total = 0usize;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = r.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        total += n;
+    }
+    Ok(total)
 }
 
 /// Structural + semantic validation of the `wafer.toml` manifest.
@@ -268,15 +298,19 @@ license = "MIT"
 
     #[test]
     fn happy_path() {
+        let wasm = b"\0asm\x01\x00\x00\x00";
         let tarball = make_tarball(&[
             ("wafer.toml", VALID_TOML.as_bytes()),
-            ("widget.wasm", b"\0asm\x01\x00\x00\x00"),
+            ("widget.wasm", wasm),
         ]);
         let extracted = parse_and_validate(&tarball).expect("happy path");
         assert_eq!(extracted.wafer_toml.package.name, "widget");
         assert_eq!(extracted.wafer_toml.package.org, "acme");
         assert_eq!(extracted.wafer_toml.package.version, "0.1.0");
-        assert_eq!(extracted.wasm_bytes, b"\0asm\x01\x00\x00\x00");
+        // We record the `.wasm` entry's decompressed size for diagnostics;
+        // the bytes themselves are intentionally discarded (the raw
+        // gzipped archive is what gets persisted by the publish flow).
+        assert_eq!(extracted.wasm_size_bytes, wasm.len());
         assert_eq!(extracted.sha256.len(), 64);
     }
 
