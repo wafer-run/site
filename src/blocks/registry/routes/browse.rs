@@ -12,10 +12,9 @@ pub async fn index(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> O
     let q = msg.query("q");
     let query_str = if q.is_empty() { "" } else { q };
     let (packages, total) =
-        match db::list_packages(ctx, if q.is_empty() { None } else { Some(q) }, 1, 50).await {
-            Ok(result) => result,
-            Err(_) => (vec![], 0),
-        };
+        db::list_packages(ctx, if q.is_empty() { None } else { Some(q) }, 1, 50)
+            .await
+            .unwrap_or_default();
     let body = templates::browse(&packages, query_str, total).into_string();
     resp::ok_html(&body)
 }

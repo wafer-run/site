@@ -126,7 +126,7 @@ impl Block for RegistryBlock {
             // Unmatched route.
             _ => OutputStream::error(WaferError {
                 code: wafer_run::ErrorCode::NotFound,
-                message: format!("No route for {} {}", action, path),
+                message: format!("No route for {action} {path}"),
                 meta: vec![],
             }),
         }

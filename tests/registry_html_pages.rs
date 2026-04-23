@@ -19,8 +19,7 @@ async fn browse_empty_renders_empty_state() {
     let body = resp.text().await.expect("read response body");
     assert!(
         body.contains("No packages published yet."),
-        "expected 'No packages published yet.' in body, got: {}",
-        body
+        "expected 'No packages published yet.' in body, got: {body}"
     );
 }
 
@@ -30,14 +29,9 @@ async fn unknown_package_detail_404_template() {
     let resp = app.get("/registry/acme/widget").await;
     assert_eq!(resp.status(), 404);
     let body = resp.text().await.expect("read response body");
-    assert!(
-        body.contains("404"),
-        "expected '404' in body, got: {}",
-        body
-    );
+    assert!(body.contains("404"), "expected '404' in body, got: {body}");
     assert!(
         body.contains("acme/widget"),
-        "expected 'acme/widget' in body, got: {}",
-        body
+        "expected 'acme/widget' in body, got: {body}"
     );
 }

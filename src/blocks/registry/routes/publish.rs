@@ -206,9 +206,8 @@ async fn read_multipart_tarball(msg: &Message, input: InputStream) -> Result<Vec
         let Some(hdr_end) = find_bytes(part, b"\r\n\r\n") else {
             continue;
         };
-        let headers = match std::str::from_utf8(&part[..hdr_end]) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let Ok(headers) = std::str::from_utf8(&part[..hdr_end]) else {
+            continue;
         };
         if !header_has_name_tarball(headers) {
             continue;

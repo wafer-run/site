@@ -145,10 +145,7 @@ fn field_bool(data: &std::collections::HashMap<String, serde_json::Value>, key: 
     match data.get(key) {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(serde_json::Value::Number(n)) => n.as_i64().map(|i| i != 0).unwrap_or(false),
-        Some(serde_json::Value::String(s)) => match s.as_str() {
-            "1" | "true" | "TRUE" | "True" => true,
-            _ => false,
-        },
+        Some(serde_json::Value::String(s)) => matches!(s.as_str(), "1" | "true" | "TRUE" | "True"),
         _ => false,
     }
 }

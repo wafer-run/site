@@ -29,11 +29,8 @@ pub async fn yank(
     if let Err(out) = auth::require_admin(ctx, msg, cfg).await {
         return out;
     }
-    let (org, name, version) = match parse_path(msg.path(), "/yank") {
-        Some(t) => t,
-        None => {
-            return resp::bad_request("Expected /registry/api/packages/{org}/{name}/{version}/yank")
-        }
+    let Some((org, name, version)) = parse_path(msg.path(), "/yank") else {
+        return resp::bad_request("Expected /registry/api/packages/{org}/{name}/{version}/yank");
     };
 
     // Best-effort reason extraction — missing body, invalid JSON, or no
@@ -65,13 +62,8 @@ pub async fn unyank(
     if let Err(out) = auth::require_admin(ctx, msg, cfg).await {
         return out;
     }
-    let (org, name, version) = match parse_path(msg.path(), "/unyank") {
-        Some(t) => t,
-        None => {
-            return resp::bad_request(
-                "Expected /registry/api/packages/{org}/{name}/{version}/unyank",
-            )
-        }
+    let Some((org, name, version)) = parse_path(msg.path(), "/unyank") else {
+        return resp::bad_request("Expected /registry/api/packages/{org}/{name}/{version}/unyank");
     };
     match db::set_yanked(ctx, &org, &name, &version, false, None).await {
         Ok(true) => resp::ok_json(&json!({ "yanked": false })),
