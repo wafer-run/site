@@ -33,6 +33,7 @@ impl Block for RegistryBlock {
         .requires(vec![
             "wafer-run/database".into(),
             "wafer-run/storage".into(),
+            "suppers-ai/auth".into(),
         ])
         .collections(vec![
             CollectionSchema::new(db::ORGS)

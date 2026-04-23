@@ -31,7 +31,7 @@ pub async fn page(ctx: &dyn Context, msg: &Message, cfg: &RegistryConfig) -> Out
         Ok(u) => u,
         Err(out) => return out,
     };
-    match db::issue_cli_code(ctx, &admin.id).await {
+    match db::issue_cli_code(ctx, &admin.id, &admin.email).await {
         Ok(code) => resp::ok_html(&templates::cli_login_code(&code).into_string()),
         Err(e) => resp::internal(&format!("issue code: {e}")),
     }

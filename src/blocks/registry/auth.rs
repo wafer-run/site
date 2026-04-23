@@ -67,8 +67,9 @@ pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser
     //    one implementation — Task 12 centralized it there.
     let auth_header = msg.header("authorization");
     if let Some(token) = auth_header.strip_prefix("Bearer ") {
-        if let Ok(Some(user_id)) = db::resolve_bearer(ctx, token).await {
-            let email = fetch_email(ctx, &user_id).await;
+        if let Ok(Some((user_id, email))) = db::resolve_bearer(ctx, token).await {
+            // Email was captured at CLI-login exchange time and lives on the
+            // token row, so no cross-block profile fetch is needed here.
             return Ok(AuthedUser { id: user_id, email });
         }
         // Fall through to auth-block delegation on None/Err — a mismatched
@@ -81,6 +82,7 @@ pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser
     //    adapter uses — see `MigrationTestCtx`'s dispatch path in
     //    solobase-core/tests/auth/block_dispatch.rs for the reference shape.
     let mut auth_msg = Message::new(ServiceOp::AUTH_REQUIRE_USER);
+    auth_msg.set_meta("req.action", ServiceOp::AUTH_REQUIRE_USER);
     let cookie = msg.header("cookie");
     if !cookie.is_empty() {
         auth_msg.set_meta("http.header.cookie", cookie);
@@ -96,7 +98,7 @@ pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser
     let uid: UserIdResponse =
         serde_json::from_slice(&buf.body).map_err(|_| unauthorized_response())?;
 
-    let email = fetch_email(ctx, &uid.user_id).await;
+    let email = fetch_email(ctx, msg, &uid.user_id).await;
     Ok(AuthedUser {
         id: uid.user_id,
         email,
@@ -107,18 +109,55 @@ pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser
 /// the auth block may not be registered (test harnesses) or the user may
 /// have been deleted out from under a valid token. Callers must treat an
 /// empty email as "not admin" to stay safe.
-async fn fetch_email(ctx: &dyn Context, user_id: &str) -> String {
-    let prof_msg = Message::new(ServiceOp::AUTH_USER_PROFILE);
-    let Ok(body) = serde_json::to_vec(&serde_json::json!({ "user_id": user_id })) else {
-        return String::new();
-    };
+async fn fetch_email(ctx: &dyn Context, inbound: &Message, user_id: &str) -> String {
+    // Solobase's SolobaseAuthBlock exposes auth as an http-handler block —
+    // not the auth@v1 service interface. That strips the service-op names
+    // (`auth.user_profile`, `auth.require_user`) from the runtime's action
+    // validator, so we can't call `ServiceOp::AUTH_USER_PROFILE` directly.
+    // Instead, call the block's declared HTTP endpoint `/b/auth/api/me`
+    // with action="retrieve" — which IS in the endpoint list — and
+    // forward the inbound cookie/authorization so the auth block treats
+    // us as the same caller the browser is.
+    //
+    // The returned body shape is solobase's `MeResponse { user: { email }, ... }`
+    // (see `crates/solobase-core/src/blocks/auth/handlers/me.rs`).
+    let mut me_msg = Message::new("");
+    me_msg.set_meta("req.action", "retrieve");
+    me_msg.set_meta("req.resource", "/b/auth/api/me");
+    let cookie = inbound.header("cookie");
+    if !cookie.is_empty() {
+        me_msg.set_meta("http.header.cookie", cookie);
+    }
+    let authz = inbound.header("authorization");
+    if !authz.is_empty() {
+        me_msg.set_meta("http.header.authorization", authz);
+    }
+    let _ = user_id; // solobase /me reads identity from the cookie/bearer, not a body param
+
+    #[derive(Deserialize)]
+    struct MeUser {
+        email: String,
+    }
+    #[derive(Deserialize)]
+    struct MeResponse {
+        user: MeUser,
+    }
+
     match ctx
-        .call_block_buffered("suppers-ai/auth", prof_msg, &body)
+        .call_block_buffered("suppers-ai/auth", me_msg, &[])
         .await
     {
-        Ok(buf) => serde_json::from_slice::<UserProfileResponse>(&buf.body)
-            .map(|p| p.email)
-            .unwrap_or_default(),
+        Ok(buf) => {
+            // Try the nested-user shape first; fall back to flat {email} if
+            // the shape ever changes.
+            if let Ok(m) = serde_json::from_slice::<MeResponse>(&buf.body) {
+                return m.user.email;
+            }
+            if let Ok(m) = serde_json::from_slice::<UserProfileResponse>(&buf.body) {
+                return m.email;
+            }
+            String::new()
+        }
         Err(_) => String::new(),
     }
 }

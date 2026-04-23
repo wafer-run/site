@@ -424,7 +424,7 @@ fn sha256_hex(input: &str) -> String {
 ///
 /// Codes are single-use and expire 15 minutes after issuance. The unused /
 /// unexpired check runs in [`exchange_cli_code`].
-pub async fn issue_cli_code(ctx: &dyn Context, user_id: &str) -> Result<String> {
+pub async fn issue_cli_code(ctx: &dyn Context, user_id: &str, email: &str) -> Result<String> {
     let mut buf = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
     let code = hex::encode(buf);
@@ -434,6 +434,7 @@ pub async fn issue_cli_code(ctx: &dyn Context, user_id: &str) -> Result<String> 
     let mut data: HashMap<String, serde_json::Value> = HashMap::new();
     data.insert("code".into(), json!(code));
     data.insert("user_id".into(), json!(user_id));
+    data.insert("email".into(), json!(email));
     data.insert("expires_at".into(), json!(expires));
     // Declare `used_at` explicitly as null at issuance. The sqlite service's
     // auto-table-creation path (`ensure_table`) builds columns from the keys
@@ -499,6 +500,15 @@ pub async fn exchange_cli_code(ctx: &dyn Context, code: &str) -> Result<Option<(
         // it as "invalid" rather than minting a PAT for nobody.
         return Ok(None);
     }
+    // Email was captured at issue_cli_code time (cookie session was present
+    // then). Copy it onto the token so downstream bearer-path admin checks
+    // don't need a cross-block profile lookup.
+    let email = row
+        .data
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
 
     // Mint the PAT.
     let mut buf = [0u8; 32];
@@ -517,6 +527,7 @@ pub async fn exchange_cli_code(ctx: &dyn Context, code: &str) -> Result<Option<(
     // Insert the token row. Store the hash, not the raw PAT.
     let mut tok_data: HashMap<String, serde_json::Value> = HashMap::new();
     tok_data.insert("user_id".into(), json!(user_id));
+    tok_data.insert("email".into(), json!(email));
     tok_data.insert("name".into(), json!("wafer-cli"));
     tok_data.insert("hash".into(), json!(token_hash));
     // `last_used_at` + `revoked_at` left unset.
@@ -538,7 +549,10 @@ pub async fn exchange_cli_code(ctx: &dyn Context, code: &str) -> Result<Option<(
 /// Replaces the inline sha256+lookup that `auth::require_user` used before
 /// Task 12. Centralizing here means any future token shape change (rotation,
 /// last-used bookkeeping) lands in one place.
-pub async fn resolve_bearer(ctx: &dyn Context, token_plain: &str) -> Result<Option<String>> {
+pub async fn resolve_bearer(
+    ctx: &dyn Context,
+    token_plain: &str,
+) -> Result<Option<(String, String)>> {
     let hash = sha256_hex(token_plain);
     match db::get_by_field(ctx, TOKENS, "hash", json!(hash)).await {
         Ok(row) => {
@@ -560,10 +574,16 @@ pub async fn resolve_bearer(ctx: &dyn Context, token_plain: &str) -> Result<Opti
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
+            let email = row
+                .data
+                .get("email")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
             if user_id.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(user_id))
+                Ok(Some((user_id, email)))
             }
         }
         Err(ref e) if is_not_found(e) => Ok(None),

@@ -29,7 +29,7 @@ use wafer_site::blocks::registry;
 async fn issue_cli_code_persists_code_row() {
     let ctx = common::boot_registry_against_memory().await;
 
-    let code = registry::db::issue_cli_code(ctx.as_ref(), "u1")
+    let code = registry::db::issue_cli_code(ctx.as_ref(), "u1", "u1@example.com")
         .await
         .expect("issue code");
 
@@ -63,7 +63,7 @@ async fn issue_cli_code_persists_code_row() {
 async fn exchange_happy_path_issues_pat_and_stores_hash() {
     let ctx = common::boot_registry_against_memory().await;
 
-    let code = registry::db::issue_cli_code(ctx.as_ref(), "admin-user")
+    let code = registry::db::issue_cli_code(ctx.as_ref(), "admin-user", "admin@example.com")
         .await
         .expect("issue code");
 
@@ -99,7 +99,7 @@ async fn exchange_happy_path_issues_pat_and_stores_hash() {
 async fn exchange_twice_returns_none() {
     let ctx = common::boot_registry_against_memory().await;
 
-    let code = registry::db::issue_cli_code(ctx.as_ref(), "admin-user")
+    let code = registry::db::issue_cli_code(ctx.as_ref(), "admin-user", "admin@example.com")
         .await
         .expect("issue code");
 
@@ -134,7 +134,7 @@ async fn resolve_bearer_returns_user_id_for_valid_token() {
     let ctx = common::boot_registry_against_memory().await;
 
     // Mint via the exchange path so the token hash lands in TOKENS.
-    let code = registry::db::issue_cli_code(ctx.as_ref(), "u1")
+    let code = registry::db::issue_cli_code(ctx.as_ref(), "u1", "u1@example.com")
         .await
         .expect("issue");
     let (_uid, token) = registry::db::exchange_cli_code(ctx.as_ref(), &code)
@@ -145,7 +145,7 @@ async fn resolve_bearer_returns_user_id_for_valid_token() {
     let resolved = registry::db::resolve_bearer(ctx.as_ref(), &token)
         .await
         .expect("resolve ok");
-    assert_eq!(resolved.as_deref(), Some("u1"));
+    assert_eq!(resolved.as_ref().map(|t| t.0.as_str()), Some("u1"));
 }
 
 /// Revoked tokens (those with `revoked_at` set) resolve to `None`.

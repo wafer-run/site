@@ -202,10 +202,36 @@ impl InMemoryCtx {
                 let body = serde_json::to_vec(&json!({ "email": email })).unwrap();
                 OutputStream::respond(body)
             }
-            other => OutputStream::error(WaferError::new(
-                wafer_run::types::ErrorCode::NotFound,
-                format!("suppers-ai/auth stub: unhandled action {other}"),
-            )),
+            _ => {
+                // Fall back to HTTP-style dispatch: registry::auth::fetch_email
+                // makes a retrieve against `/b/auth/api/me` as a WRAP-safe
+                // way to get the profile without the service-op interface.
+                // The real solobase block serves this endpoint; mirror the
+                // minimum shape here.
+                let path = msg.path().to_string();
+                let req_action = msg.header("req.action");
+                let retrieve_action = req_action == "retrieve" || msg.action() == "retrieve";
+                if retrieve_action && path == "/b/auth/api/me" {
+                    let cookie = msg.header("cookie");
+                    if let Some(user_id) = parse_session_cookie(cookie) {
+                        if let Some(email) = self.identities.get(&user_id) {
+                            let body = serde_json::to_vec(&json!({
+                                "user": { "email": email }
+                            }))
+                            .unwrap();
+                            return OutputStream::respond(body);
+                        }
+                    }
+                    return OutputStream::error(WaferError::new(
+                        wafer_run::types::ErrorCode::Unauthenticated,
+                        "auth stub /b/auth/api/me: no session".to_string(),
+                    ));
+                }
+                OutputStream::error(WaferError::new(
+                    wafer_run::types::ErrorCode::NotFound,
+                    format!("suppers-ai/auth stub: unhandled action {action}"),
+                ))
+            }
         }
     }
 }
@@ -419,7 +445,7 @@ pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
     let (mut app, ctx) = start_with(admin_email, identities).await;
 
     let raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
-    seed_token(ctx.as_ref(), &admin_id, &raw).await;
+    seed_token(ctx.as_ref(), &admin_id, admin_email, &raw).await;
     app.admin_token = raw;
     app
 }
@@ -470,10 +496,10 @@ pub async fn start_test_site_with_user(user_email: &str, admin_email: &str) -> T
     let (mut app, ctx) = start_with(admin_email, identities).await;
 
     let admin_raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
-    seed_token(ctx.as_ref(), &admin_id, &admin_raw).await;
+    seed_token(ctx.as_ref(), &admin_id, admin_email, &admin_raw).await;
 
     let user_raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
-    seed_token(ctx.as_ref(), &user_id, &user_raw).await;
+    seed_token(ctx.as_ref(), &user_id, user_email, &user_raw).await;
 
     app.admin_token = admin_raw;
     app.user_token = user_raw;
@@ -520,11 +546,12 @@ license = "MIT"
 /// Insert a row into the registry's `TOKENS` collection for the given
 /// user. The hash is `sha256(raw)` — same shape `exchange_cli_code`
 /// produces, so `resolve_bearer` accepts the raw token verbatim.
-async fn seed_token(ctx: &dyn Context, user_id: &str, raw_token: &str) {
+async fn seed_token(ctx: &dyn Context, user_id: &str, email: &str, raw_token: &str) {
     use wafer_core::clients::database as db;
     let hash = hex::encode(Sha256::digest(raw_token.as_bytes()));
     let mut data: HashMap<String, serde_json::Value> = HashMap::new();
     data.insert("user_id".into(), json!(user_id));
+    data.insert("email".into(), json!(email));
     data.insert("name".into(), json!("wafer-cli"));
     data.insert("hash".into(), json!(hash));
     // Declare optional fields explicitly so the auto-schema path doesn't
