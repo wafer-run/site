@@ -16,7 +16,6 @@ pub fn layout(title: &str, body: Markup) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (title) }
-                link rel="stylesheet" href="/static/site.css";
             }
             body {
                 header { nav {
@@ -24,6 +23,9 @@ pub fn layout(title: &str, body: Markup) -> Markup {
                     a href="/docs" { "Docs" }
                     a href="/registry" { "Registry" }
                     a href="/playground" { "Playground" }
+                    span.spacer { " " }
+                    a href="/b/auth/login" { "Log in" }
+                    a href="/registry/cli-login" { "CLI" }
                 }}
                 main { (body) }
             }
