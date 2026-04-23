@@ -7,6 +7,7 @@ pub mod db;
 pub mod handlers;
 pub mod models;
 pub mod routes;
+pub mod templates;
 
 use std::sync::Arc;
 use wafer_run::Wafer;

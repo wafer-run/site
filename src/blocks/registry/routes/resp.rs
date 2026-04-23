@@ -84,3 +84,30 @@ pub fn internal(message: &str) -> OutputStream {
         &serde_json::json!({ "error": "internal", "message": message }),
     )
 }
+
+/// Build an HTML response with an explicit HTTP status.
+fn html_response(status: u16, body: &str) -> OutputStream {
+    OutputStream::respond_with_meta(
+        body.as_bytes().to_vec(),
+        vec![
+            MetaEntry {
+                key: META_RESP_STATUS.into(),
+                value: status.to_string(),
+            },
+            MetaEntry {
+                key: META_RESP_CONTENT_TYPE.into(),
+                value: "text/html; charset=utf-8".into(),
+            },
+        ],
+    )
+}
+
+/// 200 OK with HTML body.
+pub fn ok_html(body: &str) -> OutputStream {
+    html_response(200, body)
+}
+
+/// 404 Not Found with HTML body.
+pub fn not_found_html(body: &str) -> OutputStream {
+    html_response(404, body)
+}
