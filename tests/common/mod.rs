@@ -503,7 +503,16 @@ pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
     claims.insert("sub".to_string(), json!(user_id));
     claims.insert("email".to_string(), json!(email));
     claims.insert("type".to_string(), json!("access"));
-    let key = solobase_core::crypto::derive_block_jwt_key(TEST_JWT_SECRET, "suppers-ai/auth");
+    // Same inline HKDF as site's `auth::derive_block_jwt_key_local` — keeps
+    // the test binary off solobase's pub-API surface so it builds without
+    // the upstream pub-fn change landing first.
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    let hk = Hkdf::<Sha256>::new(None, TEST_JWT_SECRET.as_bytes());
+    let info = "wafer-jwt|suppers-ai/auth";
+    let mut okm = [0u8; 32];
+    hk.expand(info.as_bytes(), &mut okm).expect("HKDF expand");
+    let key: String = okm.iter().map(|b| format!("{b:02x}")).collect();
     solobase_core::crypto::jwt_sign(&claims, Duration::from_secs(3600), &key)
 }
 

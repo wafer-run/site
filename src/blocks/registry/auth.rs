@@ -3,45 +3,31 @@
 //! Two public entry points:
 //!
 //! - [`require_user`] — resolve the caller to an `AuthedUser` by checking a
-//!   Bearer PAT against `registry_tokens` first, then falling back to the
-//!   `suppers-ai/auth` block (session cookie or solobase-issued token).
+//!   Bearer PAT against `registry_tokens` first, then falling back to
+//!   verifying a solobase-issued JWT (Bearer header or `auth_token` cookie).
 //! - [`require_admin`] — wraps `require_user` and additionally gates on the
 //!   configured admin email. Non-admins get the "coming-soon" response.
-//!
-//! Task 11 does not mount either helper on a route — Tasks 12+ will plug
-//! them in. Keeping them isolated here means the gate implementation can be
-//! unit-tested without touching the HTTP dispatch path.
 //!
 //! No raw SQL is used: the PAT lookup goes through
 //! `wafer_core::clients::database::get_by_field`.
 
-use serde::Deserialize;
-use wafer_run::{common::ServiceOp, context::Context, types::Message, OutputStream};
+use wafer_run::{context::Context, types::Message, OutputStream};
 
 use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
 
 /// The authenticated caller, as resolved by [`require_user`].
 ///
-/// `email` is populated best-effort from `suppers-ai/auth`'s user-profile
-/// service. In test harnesses that don't wire the auth block it will be
-/// empty — callers like [`require_admin`] that compare on email must treat
-/// an empty string as "not the admin".
+/// `email` is read from the token's `email` claim (JWT) or the
+/// `registry_tokens.email` column (PAT). It may be an empty string when the
+/// token was minted before we started capturing email — callers like
+/// [`require_admin`] that compare on email must treat an empty string as
+/// "not the admin".
 #[derive(Clone, Debug)]
 pub struct AuthedUser {
     /// Opaque user id — matches `UserId(String)` in `wafer-core::interfaces::auth`.
     pub id: String,
-    /// User's email address. Empty string when we couldn't fetch a profile.
+    /// User's email address. Empty string when the token didn't carry one.
     pub email: String,
-}
-
-#[derive(Deserialize)]
-struct UserIdResponse {
-    user_id: String,
-}
-
-#[derive(Deserialize)]
-struct UserProfileResponse {
-    email: String,
 }
 
 /// Resolve the caller to an [`AuthedUser`].
@@ -106,6 +92,20 @@ pub async fn require_user(
     Err(unauthorized_response())
 }
 
+/// Inline copy of `solobase_core::crypto::derive_block_jwt_key` (currently
+/// private upstream). Remove once solobase exposes the helper — see
+/// solobase PR #24.
+fn derive_block_jwt_key_local(master_secret: &str, block_id: &str) -> String {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    let hk = Hkdf::<Sha256>::new(None, master_secret.as_bytes());
+    let info = format!("wafer-jwt|{block_id}");
+    let mut okm = [0u8; 32];
+    hk.expand(info.as_bytes(), &mut okm).expect("HKDF expand");
+    okm.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Find a JWT in the request — either the Authorization Bearer header or
 /// the `auth_token` cookie that solobase's OAuth callback sets.
 fn find_jwt_token(msg: &Message) -> Option<String> {
@@ -134,7 +134,11 @@ fn verify_jwt(
     token: &str,
     jwt_secret: &str,
 ) -> Option<std::collections::HashMap<String, serde_json::Value>> {
-    let derived = solobase_core::crypto::derive_block_jwt_key(jwt_secret, "suppers-ai/auth");
+    // Derived-key signing: solobase's auth block signs JWTs with HKDF-SHA256
+    // of the master secret + block id ("wafer-jwt|suppers-ai/auth"). Mirrors
+    // `solobase_core::crypto::derive_block_jwt_key` so we don't depend on
+    // that fn being pub upstream (it isn't yet on solobase main).
+    let derived = derive_block_jwt_key_local(jwt_secret, "suppers-ai/auth");
     if let Ok(claims) = solobase_core::crypto::jwt_verify(token, &derived) {
         if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
             return Some(claims);
@@ -148,69 +152,11 @@ fn verify_jwt(
     None
 }
 
-/// Best-effort profile lookup for the email. Returns `""` on any failure —
-/// the auth block may not be registered (test harnesses) or the user may
-/// have been deleted out from under a valid token. Callers must treat an
-/// empty email as "not admin" to stay safe.
-async fn fetch_email(ctx: &dyn Context, inbound: &Message, user_id: &str) -> String {
-    // Solobase's SolobaseAuthBlock exposes auth as an http-handler block —
-    // not the auth@v1 service interface. That strips the service-op names
-    // (`auth.user_profile`, `auth.require_user`) from the runtime's action
-    // validator, so we can't call `ServiceOp::AUTH_USER_PROFILE` directly.
-    // Instead, call the block's declared HTTP endpoint `/b/auth/api/me`
-    // with action="retrieve" — which IS in the endpoint list — and
-    // forward the inbound cookie/authorization so the auth block treats
-    // us as the same caller the browser is.
-    //
-    // The returned body shape is solobase's `MeResponse { user: { email }, ... }`
-    // (see `crates/solobase-core/src/blocks/auth/handlers/me.rs`).
-    let mut me_msg = Message::new("");
-    me_msg.set_meta("req.action", "retrieve");
-    me_msg.set_meta("req.resource", "/b/auth/api/me");
-    let cookie = inbound.header("cookie");
-    if !cookie.is_empty() {
-        me_msg.set_meta("http.header.cookie", cookie);
-    }
-    let authz = inbound.header("authorization");
-    if !authz.is_empty() {
-        me_msg.set_meta("http.header.authorization", authz);
-    }
-    let _ = user_id; // solobase /me reads identity from the cookie/bearer, not a body param
-
-    #[derive(Deserialize)]
-    struct MeUser {
-        email: String,
-    }
-    #[derive(Deserialize)]
-    struct MeResponse {
-        user: MeUser,
-    }
-
-    match ctx
-        .call_block_buffered("suppers-ai/auth", me_msg, &[])
-        .await
-    {
-        Ok(buf) => {
-            // Try the nested-user shape first; fall back to flat {email} if
-            // the shape ever changes.
-            if let Ok(m) = serde_json::from_slice::<MeResponse>(&buf.body) {
-                return m.user.email;
-            }
-            if let Ok(m) = serde_json::from_slice::<UserProfileResponse>(&buf.body) {
-                return m.email;
-            }
-            String::new()
-        }
-        Err(_) => String::new(),
-    }
-}
-
 /// Gate on the configured admin email.
 ///
 /// On a hit, returns the authenticated user. On a miss, returns a 403
 /// "coming-soon" response — HTML when the caller `Accept`s HTML, JSON
-/// otherwise. Empty/missing email is treated as "not admin" (see the
-/// [`fetch_email`] doc comment for why an empty email can occur).
+/// otherwise. Empty/missing email is treated as "not admin".
 pub async fn require_admin(
     ctx: &dyn Context,
     msg: &Message,
