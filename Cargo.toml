@@ -42,8 +42,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 
 [dev-dependencies]
-wafer-block-sqlite = { path = "../wafer-run/crates/wafer-block-sqlite" }
-wafer-block        = { path = "../wafer-run/crates/wafer-block" }
+wafer-block-sqlite        = { path = "../wafer-run/crates/wafer-block-sqlite" }
+wafer-block               = { path = "../wafer-run/crates/wafer-block" }
+wafer-block-http-listener = { path = "../wafer-run/crates/wafer-block-http-listener" }
+axum = "0.8"
 
 [lints.clippy]
 redundant_clone = "warn"

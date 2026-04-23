@@ -9,4 +9,5 @@ pub mod download;
 pub mod me;
 pub mod packages;
 pub mod publish;
+pub mod resp;
 pub mod yank;
