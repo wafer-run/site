@@ -541,6 +541,206 @@ pub async fn resolve_bearer(ctx: &dyn Context, token_plain: &str) -> Result<Opti
     }
 }
 
+// ---- Publish helpers ------------------------------------------------------
+//
+// Task 13: writes that land a new `{org}/{name}@{version}` row. Every helper
+// goes through the typed `wafer_core::clients::database` API — no raw SQL.
+//
+// Schema-drift note: the in-memory harness auto-creates tables from the
+// first-inserted row's keys. So every nullable `VERSIONS` column
+// (`license`, `readme_md`, `yanked_reason`, `yanked_at`) must be present in
+// the first insert, even when absent from the uploaded manifest. We write
+// `Value::Null` for every one — the production CollectionSchema path
+// tolerates this, and the in-memory path won't drop columns we'll later
+// `update` in the yank flow.
+
+/// Get-or-create an org row by name.
+///
+/// - If an `orgs` row with `name == org` exists, its id is returned verbatim.
+/// - Otherwise a new row is inserted with `owner_user_id = owner_user_id`
+///   (stored as a string — the schema declares it that way) and the
+///   requested `is_reserved` flag. Reserved rows get `owner_user_id = null`
+///   so they remain unowned even after a publish.
+pub async fn upsert_org(
+    ctx: &dyn Context,
+    name: &str,
+    owner_user_id: &str,
+    is_reserved: bool,
+) -> Result<String> {
+    if let Some(existing) = find_org_by_name(ctx, name).await? {
+        return Ok(existing.id);
+    }
+    let mut data: HashMap<String, serde_json::Value> = HashMap::new();
+    data.insert("name".into(), json!(name));
+    data.insert("is_reserved".into(), json!(is_reserved));
+    // Reserved orgs are project-owned; surface that by leaving the owner
+    // explicitly null rather than pointing at whoever happened to seed them.
+    if is_reserved {
+        data.insert("owner_user_id".into(), serde_json::Value::Null);
+    } else {
+        data.insert("owner_user_id".into(), json!(owner_user_id));
+    }
+    let row = db::create(ctx, ORGS, data)
+        .await
+        .map_err(|e| anyhow::anyhow!("upsert_org({name}): {e:?}"))?;
+    Ok(row.id)
+}
+
+/// Whether a version row exists for `{org}/{name}@{version}`. Resolves via
+/// the client-side org → package → versions walk; returns `false` if any
+/// step is missing (nothing to dedupe against).
+pub async fn version_exists(
+    ctx: &dyn Context,
+    org: &str,
+    name: &str,
+    version: &str,
+) -> Result<bool> {
+    let Some(org_row) = find_org_by_name(ctx, org).await? else {
+        return Ok(false);
+    };
+    let Some(pkg_row) = find_package(ctx, &org_row.id, name).await? else {
+        return Ok(false);
+    };
+    let hits = db::list_all(
+        ctx,
+        VERSIONS,
+        vec![
+            eq("package_id", json!(pkg_row.id)),
+            eq("version", json!(version)),
+        ],
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("version_exists({org}/{name}@{version}): {e:?}"))?;
+    Ok(!hits.is_empty())
+}
+
+/// Whether the `{org}` is reserved (project-owned). Returns `false` if the
+/// org row doesn't exist — a not-yet-created org can't be reserved.
+pub async fn is_reserved(ctx: &dyn Context, org_name: &str) -> Result<bool> {
+    match find_org_by_name(ctx, org_name).await? {
+        Some(row) => Ok(field_bool(&row.data, "is_reserved")),
+        None => Ok(false),
+    }
+}
+
+/// Insert (or get-or-create) the package row for `{org_id, pkg_name}`, then
+/// insert the version row with all manifest + storage fields.
+///
+/// Dependencies and capabilities are serialized to JSON strings — the
+/// schema declares them as `string` with defaults of `"[]"` / `"{}"`.
+///
+/// Every nullable `VERSIONS` column is written (as `Null` when the manifest
+/// didn't supply a value) to avoid the in-memory harness's schema-drift
+/// trap: auto-created tables pick their columns from the first insert, and
+/// subsequent `update` calls (like Task 14's yank) need those columns to
+/// exist.
+pub async fn insert_version(
+    ctx: &dyn Context,
+    org_id: &str,
+    pkg_name: &str,
+    user_id: &str,
+    t: &crate::blocks::registry::tarball::ExtractedTarball,
+    storage_key: &str,
+) -> Result<()> {
+    let now = now_unix();
+
+    // Package row: get-or-create keyed by (org_id, name).
+    let pkg_id = if let Some(existing) = find_package(ctx, org_id, pkg_name).await? {
+        existing.id
+    } else {
+        let mut data: HashMap<String, serde_json::Value> = HashMap::new();
+        data.insert("org_id".into(), json!(org_id));
+        data.insert("name".into(), json!(pkg_name));
+        data.insert(
+            "summary".into(),
+            match &t.wafer_toml.package.summary {
+                Some(s) => json!(s),
+                None => serde_json::Value::Null,
+            },
+        );
+        data.insert("created_by".into(), json!(user_id));
+        let row = db::create(ctx, PACKAGES, data)
+            .await
+            .map_err(|e| anyhow::anyhow!("insert_version create package: {e:?}"))?;
+        row.id
+    };
+
+    // Version row. Stringify dependencies + capabilities via toml::Value
+    // -> serde_json::Value so the serialization is deterministic and the
+    // schema's "string" column types hold. Omitted sections default to
+    // the empty collection so the stored blob always parses.
+    let deps_json = t
+        .wafer_toml
+        .dependencies
+        .as_ref()
+        .map(toml_to_json)
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let caps_json = t
+        .wafer_toml
+        .capabilities
+        .as_ref()
+        .map(toml_to_json)
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+
+    let mut data: HashMap<String, serde_json::Value> = HashMap::new();
+    data.insert("package_id".into(), json!(pkg_id));
+    data.insert("version".into(), json!(&t.wafer_toml.package.version));
+    data.insert("abi".into(), json!(t.wafer_toml.package.abi as i64));
+    data.insert("sha256".into(), json!(&t.sha256));
+    data.insert("storage_key".into(), json!(storage_key));
+    data.insert("size_bytes".into(), json!(t.size_bytes as i64));
+    data.insert(
+        "license".into(),
+        match &t.wafer_toml.package.license {
+            Some(s) => json!(s),
+            None => serde_json::Value::Null,
+        },
+    );
+    data.insert(
+        "readme_md".into(),
+        match &t.readme_md {
+            Some(s) => json!(s),
+            None => serde_json::Value::Null,
+        },
+    );
+    data.insert("dependencies".into(), json!(deps_json.to_string()));
+    data.insert("capabilities".into(), json!(caps_json.to_string()));
+    data.insert("yanked".into(), json!(false));
+    // Nullable fields declared explicitly — see the fn-level doc comment.
+    data.insert("yanked_reason".into(), serde_json::Value::Null);
+    data.insert("yanked_at".into(), serde_json::Value::Null);
+    data.insert("published_by".into(), json!(user_id));
+    data.insert("published_at".into(), json!(now));
+
+    db::create(ctx, VERSIONS, data)
+        .await
+        .map_err(|e| anyhow::anyhow!("insert_version create version: {e:?}"))?;
+    Ok(())
+}
+
+/// Convert a `toml::Value` to a `serde_json::Value`. Used to stringify the
+/// dependencies / capabilities sub-documents for storage — the schema
+/// declares them as `string`, so we serialize once and write the JSON text.
+fn toml_to_json(v: &toml::Value) -> serde_json::Value {
+    match v {
+        toml::Value::String(s) => json!(s),
+        toml::Value::Integer(i) => json!(i),
+        toml::Value::Float(f) => json!(f),
+        toml::Value::Boolean(b) => json!(b),
+        toml::Value::Datetime(d) => json!(d.to_string()),
+        toml::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(toml_to_json).collect())
+        }
+        toml::Value::Table(t) => {
+            let mut m = serde_json::Map::new();
+            for (k, val) in t {
+                m.insert(k.clone(), toml_to_json(val));
+            }
+            serde_json::Value::Object(m)
+        }
+    }
+}
+
 fn version_summary_from_record(r: Record) -> VersionSummary {
     VersionSummary {
         version: r

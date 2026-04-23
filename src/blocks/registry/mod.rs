@@ -8,6 +8,7 @@ pub mod db;
 pub mod handlers;
 pub mod models;
 pub mod routes;
+pub mod tarball;
 pub mod templates;
 
 use std::sync::Arc;

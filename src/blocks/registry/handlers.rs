@@ -110,19 +110,21 @@ impl Block for RegistryBlock {
             ("retrieve", p) if p.starts_with("/registry/") => {
                 routes::browse::package_detail(ctx, &msg, &self.cfg).await
             }
-            // Publish endpoint.
-            ("mutate", "/registry/api/publish") => {
+            // Publish endpoint. `http_to_message` maps POST to the action
+            // `"create"` (see `wafer-block-http-listener`); the dispatcher
+            // matches on that rather than a WAFER-abstract `"mutate"`.
+            ("create", "/registry/api/publish") => {
                 routes::publish::post(ctx, &msg, input, &self.cfg).await
             }
             // CLI login exchange.
-            ("mutate", "/registry/api/cli-login/exchange") => {
+            ("create", "/registry/api/cli-login/exchange") => {
                 routes::cli_login::exchange(ctx, &msg, input, &self.cfg).await
             }
             // Yank and unyank endpoints: match by path suffix.
-            ("mutate", p) if p.ends_with("/yank") => {
+            ("create", p) if p.ends_with("/yank") => {
                 routes::yank::yank(ctx, &msg, input, &self.cfg).await
             }
-            ("mutate", p) if p.ends_with("/unyank") => {
+            ("create", p) if p.ends_with("/unyank") => {
                 routes::yank::unyank(ctx, &msg, input, &self.cfg).await
             }
             // Unmatched route.
