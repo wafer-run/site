@@ -741,6 +741,79 @@ fn toml_to_json(v: &toml::Value) -> serde_json::Value {
     }
 }
 
+// ---- Yank helpers ---------------------------------------------------------
+//
+// Task 14: flip the `yanked` flag on a version row. Resolves
+// org → package → version client-side, then updates the version row via the
+// typed `db::update` API.
+//
+// Nullable fields (`yanked_reason`, `yanked_at`) are always written — even as
+// `Value::Null` on unyank — so the in-memory harness's auto-schema path
+// doesn't drop columns out from under us (see `insert_version`'s doc comment
+// for the same drift-guard pattern).
+
+/// Flip the yanked state of `{org}/{name}@{version}`.
+///
+/// - Returns `Ok(true)` on success (version row found + updated).
+/// - Returns `Ok(false)` when the org, package, or version row is missing —
+///   callers translate that to a 404 response.
+///
+/// Idempotent: writing `yanked = true` over an already-yanked row succeeds
+/// without error, because `db::update` doesn't care whether the new value
+/// differs from the old. Same for unyank.
+pub async fn set_yanked(
+    ctx: &dyn Context,
+    org: &str,
+    name: &str,
+    version: &str,
+    yanked: bool,
+    reason: Option<&str>,
+) -> Result<bool> {
+    let Some(org_row) = find_org_by_name(ctx, org).await? else {
+        return Ok(false);
+    };
+    let Some(pkg_row) = find_package(ctx, &org_row.id, name).await? else {
+        return Ok(false);
+    };
+
+    let hits = db::list_all(
+        ctx,
+        VERSIONS,
+        vec![
+            eq("package_id", json!(pkg_row.id)),
+            eq("version", json!(version)),
+        ],
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("set_yanked lookup({org}/{name}@{version}): {e:?}"))?;
+    let Some(ver_row) = hits.into_iter().next() else {
+        return Ok(false);
+    };
+
+    let now = now_unix();
+    let mut data: HashMap<String, serde_json::Value> = HashMap::new();
+    data.insert("yanked".into(), json!(yanked));
+    data.insert(
+        "yanked_reason".into(),
+        match (yanked, reason) {
+            (true, Some(r)) => json!(r),
+            _ => serde_json::Value::Null,
+        },
+    );
+    data.insert(
+        "yanked_at".into(),
+        if yanked {
+            json!(now)
+        } else {
+            serde_json::Value::Null
+        },
+    );
+    db::update(ctx, VERSIONS, &ver_row.id, data)
+        .await
+        .map_err(|e| anyhow::anyhow!("set_yanked update({org}/{name}@{version}): {e:?}"))?;
+    Ok(true)
+}
+
 fn version_summary_from_record(r: Record) -> VersionSummary {
     VersionSummary {
         version: r

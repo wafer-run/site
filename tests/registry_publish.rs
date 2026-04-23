@@ -17,43 +17,7 @@
 
 mod common;
 
-use common::{start_test_site_with_admin, start_test_site_with_user, TestApp};
-
-/// Build a `.wafer` (gzipped tar) archive containing a valid `wafer.toml`
-/// and a minimal `.wasm` file. Shared by every publish test so the only
-/// variable is the triple.
-fn make_tarball(org: &str, name: &str, version: &str) -> Vec<u8> {
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
-    use std::io::Cursor;
-
-    let toml = format!(
-        r#"[package]
-org = "{org}"
-name = "{name}"
-version = "{version}"
-abi = 1
-license = "MIT"
-"#
-    );
-
-    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
-    {
-        let mut tar = tar::Builder::new(&mut gz);
-        for (path, content) in [
-            ("wafer.toml", toml.as_bytes()),
-            ("widget.wasm", b"\0asm\x01\x00\x00\x00" as &[u8]),
-        ] {
-            let mut h = tar::Header::new_gnu();
-            h.set_path(path).unwrap();
-            h.set_size(content.len() as u64);
-            h.set_cksum();
-            tar.append(&h, Cursor::new(content)).unwrap();
-        }
-        tar.finish().unwrap();
-    }
-    gz.finish().unwrap()
-}
+use common::{make_tarball, start_test_site_with_admin, start_test_site_with_user, TestApp};
 
 /// Shortcut: POST a multipart `tarball` part with the given Bearer token.
 async fn publish(app: &TestApp, token: &str, bytes: Vec<u8>) -> reqwest::Response {

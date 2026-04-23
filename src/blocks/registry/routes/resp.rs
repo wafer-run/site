@@ -111,3 +111,32 @@ pub fn ok_html(body: &str) -> OutputStream {
 pub fn not_found_html(body: &str) -> OutputStream {
     html_response(404, body)
 }
+
+/// Build a raw-bytes response with an explicit status and header list. Used
+/// by the download endpoint to serve tarball bytes with the right
+/// `content-type` + `cache-control`. Caller passes `(header_name,
+/// header_value)` tuples — no validation is performed, so keep them
+/// lowercase per our existing convention.
+pub fn binary_response(status: u16, bytes: Vec<u8>, headers: &[(&str, &str)]) -> OutputStream {
+    let mut meta = Vec::with_capacity(headers.len() + 1);
+    meta.push(MetaEntry {
+        key: META_RESP_STATUS.into(),
+        value: status.to_string(),
+    });
+    for (k, v) in headers {
+        // `content-type` maps to the dedicated META_RESP_CONTENT_TYPE key
+        // that `wafer_output_to_response` inspects directly. Other headers
+        // ride on the canonical `resp.header.<name>` prefix (see
+        // `wafer_block::meta::META_RESP_HEADER_PREFIX`).
+        let key = if k.eq_ignore_ascii_case("content-type") {
+            META_RESP_CONTENT_TYPE.to_string()
+        } else {
+            format!("resp.header.{}", k.to_ascii_lowercase())
+        };
+        meta.push(MetaEntry {
+            key,
+            value: (*v).to_string(),
+        });
+    }
+    OutputStream::respond_with_meta(bytes, meta)
+}

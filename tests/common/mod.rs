@@ -417,6 +417,43 @@ pub async fn start_test_site_with_user(
     app
 }
 
+/// Build a `.wafer` (gzipped tar) archive containing a valid `wafer.toml`
+/// and a minimal `.wasm` file. Shared by `registry_publish` and
+/// `registry_yank_download` so the only variable across tests is the
+/// `{org}/{name}/{version}` triple.
+pub fn make_tarball(org: &str, name: &str, version: &str) -> Vec<u8> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Cursor;
+
+    let toml = format!(
+        r#"[package]
+org = "{org}"
+name = "{name}"
+version = "{version}"
+abi = 1
+license = "MIT"
+"#
+    );
+
+    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+    {
+        let mut tar = tar::Builder::new(&mut gz);
+        for (path, content) in [
+            ("wafer.toml", toml.as_bytes()),
+            ("widget.wasm", b"\0asm\x01\x00\x00\x00" as &[u8]),
+        ] {
+            let mut h = tar::Header::new_gnu();
+            h.set_path(path).unwrap();
+            h.set_size(content.len() as u64);
+            h.set_cksum();
+            tar.append(&h, Cursor::new(content)).unwrap();
+        }
+        tar.finish().unwrap();
+    }
+    gz.finish().unwrap()
+}
+
 /// Insert a row into the registry's `TOKENS` collection for the given
 /// user. The hash is `sha256(raw)` — same shape `exchange_cli_code`
 /// produces, so `resolve_bearer` accepts the raw token verbatim.
