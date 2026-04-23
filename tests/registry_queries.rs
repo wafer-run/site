@@ -45,7 +45,10 @@ async fn create_version(
     data.insert("version".into(), json!(version));
     data.insert("abi".into(), json!(1));
     data.insert("sha256".into(), json!("0".repeat(64)));
-    data.insert("storage_key".into(), json!(format!("blobs/{version}.tar.gz")));
+    data.insert(
+        "storage_key".into(),
+        json!(format!("blobs/{version}.tar.gz")),
+    );
     data.insert("size_bytes".into(), json!(1024));
     data.insert("yanked".into(), json!(false));
     data.insert("published_at".into(), json!(published_at));
@@ -140,10 +143,9 @@ async fn typed_query_helpers_happy_path() {
     assert_eq!(v010.storage_key, "blobs/0.1.0.tar.gz");
 
     // Missing-package path: org exists (reserved), package doesn't.
-    let missing_pkg =
-        registry::db::get_version(ctx.as_ref(), "wafer-run", "nonexistent", "0.1.0")
-            .await
-            .expect("get_version nonexistent package");
+    let missing_pkg = registry::db::get_version(ctx.as_ref(), "wafer-run", "nonexistent", "0.1.0")
+        .await
+        .expect("get_version nonexistent package");
     assert!(
         missing_pkg.is_none(),
         "missing package must resolve to None, got {missing_pkg:?}"

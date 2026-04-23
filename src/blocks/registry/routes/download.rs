@@ -63,7 +63,11 @@ fn parse_download_path(tail: &str) -> Option<(String, String, String)> {
     if segs[0].is_empty() || segs[1].is_empty() || version.is_empty() {
         return None;
     }
-    Some((segs[0].to_string(), segs[1].to_string(), version.to_string()))
+    Some((
+        segs[0].to_string(),
+        segs[1].to_string(),
+        version.to_string(),
+    ))
 }
 
 #[cfg(test)]

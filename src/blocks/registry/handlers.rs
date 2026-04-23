@@ -90,16 +90,12 @@ impl Block for RegistryBlock {
             ("retrieve", "/registry") | ("retrieve", "/registry/") => {
                 routes::browse::index(ctx, &msg, &self.cfg).await
             }
-            ("retrieve", "/registry/search") => {
-                routes::browse::search(ctx, &msg, &self.cfg).await
-            }
+            ("retrieve", "/registry/search") => routes::browse::search(ctx, &msg, &self.cfg).await,
             // Package detail must come before the generic /registry/* catch.
             ("retrieve", p) if p.starts_with("/registry/api/packages/") => {
                 routes::packages::get(ctx, &msg, &self.cfg).await
             }
-            ("retrieve", "/registry/api/me") => {
-                routes::me::get(ctx, &msg, &self.cfg).await
-            }
+            ("retrieve", "/registry/api/me") => routes::me::get(ctx, &msg, &self.cfg).await,
             ("retrieve", "/registry/cli-login") => {
                 routes::cli_login::page(ctx, &msg, &self.cfg).await
             }

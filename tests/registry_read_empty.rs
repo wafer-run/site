@@ -47,9 +47,7 @@ async fn get_unknown_package_404() {
 #[tokio::test]
 async fn get_unknown_version_404() {
     let app = start_test_site().await;
-    let resp = app
-        .get("/registry/api/packages/acme/widget/1.0.0")
-        .await;
+    let resp = app.get("/registry/api/packages/acme/widget/1.0.0").await;
     assert_eq!(resp.status(), 404);
     let json: serde_json::Value = resp.json().await.expect("parse 404 json");
     assert_eq!(json["error"], "not-found");

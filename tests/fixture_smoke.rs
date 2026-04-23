@@ -6,10 +6,9 @@
 
 #[test]
 fn fixture_tarball_validates() {
-    let bytes = std::fs::read("tests/e2e/_fixtures/widget-0.1.0.wafer")
-        .expect("read fixture");
-    let t = wafer_site::blocks::registry::tarball::parse_and_validate(&bytes)
-        .expect("parse fixture");
+    let bytes = std::fs::read("tests/e2e/_fixtures/widget-0.1.0.wafer").expect("read fixture");
+    let t =
+        wafer_site::blocks::registry::tarball::parse_and_validate(&bytes).expect("parse fixture");
     assert_eq!(t.wafer_toml.package.org, "acme");
     assert_eq!(t.wafer_toml.package.name, "widget");
     assert_eq!(t.wafer_toml.package.version, "0.1.0");

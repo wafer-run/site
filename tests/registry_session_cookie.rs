@@ -20,7 +20,11 @@ async fn cli_login_page_succeeds_via_session_cookie() {
     let app = common::start_test_site_with_admin_cookie(admin_email).await;
 
     let resp = app.get("/registry/cli-login").await;
-    assert_eq!(resp.status(), 200, "cookie admin should see the CLI-login page");
+    assert_eq!(
+        resp.status(),
+        200,
+        "cookie admin should see the CLI-login page"
+    );
 
     let body = resp.text().await.expect("body");
     // The `cli_login_code` template renders the 64-char hex code inside
@@ -28,7 +32,9 @@ async fn cli_login_page_succeeds_via_session_cookie() {
     // just that a code made it through `db::issue_cli_code`. Scan for
     // any run of 64 hex chars anywhere in the body.
     let chars: Vec<char> = body.chars().collect();
-    let has_64_hex_run = chars.windows(64).any(|w| w.iter().all(|c| c.is_ascii_hexdigit()));
+    let has_64_hex_run = chars
+        .windows(64)
+        .any(|w| w.iter().all(|c| c.is_ascii_hexdigit()));
     assert!(
         has_64_hex_run,
         "expected a 64-hex-char login code in body; got: {body}",

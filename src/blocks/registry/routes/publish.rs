@@ -104,14 +104,7 @@ pub async fn post(
     let reserved = db::is_reserved(ctx, &t.wafer_toml.package.org)
         .await
         .unwrap_or(false);
-    let org_id = match db::upsert_org(
-        ctx,
-        &t.wafer_toml.package.org,
-        &admin.id,
-        reserved,
-    )
-    .await
-    {
+    let org_id = match db::upsert_org(ctx, &t.wafer_toml.package.org, &admin.id, reserved).await {
         Ok(id) => id,
         Err(e) => return resp::internal(&format!("upsert_org: {e}")),
     };
@@ -150,8 +143,7 @@ pub async fn post(
     )
     .await
     {
-        let _ =
-            wafer_core::clients::storage::delete(ctx, folder, &storage_key).await;
+        let _ = wafer_core::clients::storage::delete(ctx, folder, &storage_key).await;
         return resp::internal(&format!("db insert: {e}"));
     }
 
@@ -191,7 +183,10 @@ fn multipart_error(status: u16) -> OutputStream {
 /// says `name="tarball"` is returned. Preamble and epilogue are ignored.
 async fn read_multipart_tarball(msg: &Message, input: InputStream) -> Result<Vec<u8>, u16> {
     let content_type = msg.header("content-type");
-    if !content_type.to_ascii_lowercase().starts_with("multipart/form-data") {
+    if !content_type
+        .to_ascii_lowercase()
+        .starts_with("multipart/form-data")
+    {
         return Err(400);
     }
     let boundary = extract_boundary(content_type).ok_or(400u16)?;

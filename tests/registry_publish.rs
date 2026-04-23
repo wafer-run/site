@@ -28,14 +28,20 @@ async fn publish(app: &TestApp, token: &str, bytes: Vec<u8>) -> reqwest::Respons
             .mime_str("application/octet-stream")
             .unwrap(),
     );
-    app.post_multipart("/registry/api/publish", form, Some(token)).await
+    app.post_multipart("/registry/api/publish", form, Some(token))
+        .await
 }
 
 #[tokio::test]
 async fn admin_publish_happy_path() {
     let app = start_test_site_with_admin("admin@example.com").await;
 
-    let resp = publish(&app, &app.admin_token, make_tarball("acme", "widget", "0.1.0")).await;
+    let resp = publish(
+        &app,
+        &app.admin_token,
+        make_tarball("acme", "widget", "0.1.0"),
+    )
+    .await;
     assert_eq!(resp.status(), 200, "publish should succeed for admin");
 
     let json: serde_json::Value = resp.json().await.expect("publish response json");
@@ -83,7 +89,12 @@ async fn admin_publish_409_on_duplicate() {
 async fn non_admin_publish_403_coming_soon() {
     let app = start_test_site_with_user("nonadmin@example.com", "admin@example.com").await;
 
-    let resp = publish(&app, &app.user_token, make_tarball("acme", "widget", "0.1.0")).await;
+    let resp = publish(
+        &app,
+        &app.user_token,
+        make_tarball("acme", "widget", "0.1.0"),
+    )
+    .await;
     assert_eq!(resp.status(), 403, "non-admin must get coming-soon");
     let json: serde_json::Value = resp.json().await.expect("coming-soon json");
     assert_eq!(json["error"], "coming-soon");

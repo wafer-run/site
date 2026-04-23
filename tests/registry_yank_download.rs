@@ -31,7 +31,11 @@ async fn publish(app: &TestApp, org: &str, name: &str, ver: &str) {
     let resp = app
         .post_multipart("/registry/api/publish", form, Some(&app.admin_token))
         .await;
-    assert_eq!(resp.status(), 200, "publish {org}/{name}@{ver} should succeed");
+    assert_eq!(
+        resp.status(),
+        200,
+        "publish {org}/{name}@{ver} should succeed"
+    );
 }
 
 /// POST `/registry/api/packages/{org}/{name}/{version}/{action}` with the

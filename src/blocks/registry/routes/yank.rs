@@ -31,7 +31,9 @@ pub async fn yank(
     }
     let (org, name, version) = match parse_path(msg.path(), "/yank") {
         Some(t) => t,
-        None => return resp::bad_request("Expected /registry/api/packages/{org}/{name}/{version}/yank"),
+        None => {
+            return resp::bad_request("Expected /registry/api/packages/{org}/{name}/{version}/yank")
+        }
     };
 
     // Best-effort reason extraction — missing body, invalid JSON, or no
@@ -65,7 +67,11 @@ pub async fn unyank(
     }
     let (org, name, version) = match parse_path(msg.path(), "/unyank") {
         Some(t) => t,
-        None => return resp::bad_request("Expected /registry/api/packages/{org}/{name}/{version}/unyank"),
+        None => {
+            return resp::bad_request(
+                "Expected /registry/api/packages/{org}/{name}/{version}/unyank",
+            )
+        }
     };
     match db::set_yanked(ctx, &org, &name, &version, false, None).await {
         Ok(true) => resp::ok_json(&json!({ "yanked": false })),
@@ -84,7 +90,11 @@ fn parse_path(path: &str, suffix: &str) -> Option<(String, String, String)> {
         .strip_suffix(suffix)?;
     let segs: Vec<&str> = tail.split('/').collect();
     if segs.len() == 3 && !segs[0].is_empty() && !segs[1].is_empty() && !segs[2].is_empty() {
-        Some((segs[0].to_string(), segs[1].to_string(), segs[2].to_string()))
+        Some((
+            segs[0].to_string(),
+            segs[1].to_string(),
+            segs[2].to_string(),
+        ))
     } else {
         None
     }
@@ -113,7 +123,10 @@ mod tests {
     #[test]
     fn rejects_extra_segments() {
         assert_eq!(
-            parse_path("/registry/api/packages/acme/widget/0.1.0/extra/yank", "/yank"),
+            parse_path(
+                "/registry/api/packages/acme/widget/0.1.0/extra/yank",
+                "/yank"
+            ),
             None
         );
     }

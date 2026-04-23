@@ -88,8 +88,9 @@ impl InMemoryCtx {
             wafer_block_sqlite::service::SQLiteDatabaseService::open_in_memory()
                 .expect("open in-memory sqlite"),
         );
-        let db_block: Arc<dyn Block> =
-            Arc::new(wafer_core::service_blocks::database::DatabaseBlock::new(svc));
+        let db_block: Arc<dyn Block> = Arc::new(
+            wafer_core::service_blocks::database::DatabaseBlock::new(svc),
+        );
 
         // Storage: LocalStorageService on a tempdir. Using the real block
         // rather than a shim gives us accurate error types (folders get
@@ -114,12 +115,7 @@ impl InMemoryCtx {
 
 #[async_trait::async_trait]
 impl Context for InMemoryCtx {
-    async fn call_block(
-        &self,
-        block_name: &str,
-        msg: Message,
-        input: InputStream,
-    ) -> OutputStream {
+    async fn call_block(&self, block_name: &str, msg: Message, input: InputStream) -> OutputStream {
         match block_name {
             "wafer-run/database" => self.db_block.handle(self, msg, input).await,
             "wafer-run/storage" => self.storage_block.handle(self, msg, input).await,
@@ -178,8 +174,7 @@ impl InMemoryCtx {
                 let user_id = parse_session_cookie(cookie);
                 match user_id.filter(|id| self.identities.contains_key(id.as_str())) {
                     Some(id) => {
-                        let body =
-                            serde_json::to_vec(&json!({ "user_id": id })).unwrap();
+                        let body = serde_json::to_vec(&json!({ "user_id": id })).unwrap();
                         OutputStream::respond(body)
                     }
                     None => OutputStream::error(WaferError::new(
@@ -466,10 +461,7 @@ pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
 /// Non-admin tokens bypass the CLI-login flow in tests — in production
 /// only admins can acquire one, but we insert it directly here to cover
 /// the 403-coming-soon path.
-pub async fn start_test_site_with_user(
-    user_email: &str,
-    admin_email: &str,
-) -> TestApp {
+pub async fn start_test_site_with_user(user_email: &str, admin_email: &str) -> TestApp {
     let admin_id = "test-admin-id".to_string();
     let user_id = "test-user-id".to_string();
     let mut identities = HashMap::new();

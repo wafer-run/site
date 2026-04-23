@@ -29,7 +29,10 @@ use wafer_site::blocks::registry::{
 /// Reads the HTTP status code out of an `OutputStream` by draining it —
 /// mirrors what the real HTTP adapter does with `META_RESP_STATUS`.
 async fn status_of(out: OutputStream) -> u16 {
-    let buf = out.collect_buffered().await.expect("status-carrying response");
+    let buf = out
+        .collect_buffered()
+        .await
+        .expect("status-carrying response");
     buf.meta
         .iter()
         .find(|m| m.key == wafer_run::meta::META_RESP_STATUS)

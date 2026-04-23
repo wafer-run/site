@@ -37,9 +37,14 @@ async fn issue_cli_code_persists_code_row() {
     assert!(code.chars().all(|c| c.is_ascii_hexdigit()));
 
     // Row exists in CODES.
-    let row = db::get_by_field(ctx.as_ref(), registry::db::CODES, "code", serde_json::json!(code))
-        .await
-        .expect("fetch code row");
+    let row = db::get_by_field(
+        ctx.as_ref(),
+        registry::db::CODES,
+        "code",
+        serde_json::json!(code),
+    )
+    .await
+    .expect("fetch code row");
     assert_eq!(row.data.get("user_id").and_then(|v| v.as_str()), Some("u1"));
     // `used_at` must be absent (optional field, not set at issuance time).
     assert!(
@@ -74,9 +79,14 @@ async fn exchange_happy_path_issues_pat_and_stores_hash() {
 
     // Token row lives in TOKENS keyed by sha256(token).
     let hash = hex::encode(Sha256::digest(token.as_bytes()));
-    let tok_row = db::get_by_field(ctx.as_ref(), registry::db::TOKENS, "hash", serde_json::json!(hash))
-        .await
-        .expect("fetch token row");
+    let tok_row = db::get_by_field(
+        ctx.as_ref(),
+        registry::db::TOKENS,
+        "hash",
+        serde_json::json!(hash),
+    )
+    .await
+    .expect("fetch token row");
     assert_eq!(
         tok_row.data.get("user_id").and_then(|v| v.as_str()),
         Some("admin-user")

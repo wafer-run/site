@@ -336,10 +336,7 @@ license = "MIT"
     #[test]
     fn happy_path() {
         let wasm = b"\0asm\x01\x00\x00\x00";
-        let tarball = make_tarball(&[
-            ("wafer.toml", VALID_TOML.as_bytes()),
-            ("widget.wasm", wasm),
-        ]);
+        let tarball = make_tarball(&[("wafer.toml", VALID_TOML.as_bytes()), ("widget.wasm", wasm)]);
         let extracted = parse_and_validate(&tarball).expect("happy path");
         assert_eq!(extracted.wafer_toml.package.name, "widget");
         assert_eq!(extracted.wafer_toml.package.org, "acme");
@@ -402,10 +399,7 @@ name = "widget"
 version = "not-a-semver"
 abi = 1
 "#;
-        let tarball = make_tarball(&[
-            ("wafer.toml", bad.as_bytes()),
-            ("w.wasm", b"\0asm"),
-        ]);
+        let tarball = make_tarball(&[("wafer.toml", bad.as_bytes()), ("w.wasm", b"\0asm")]);
         let err = parse_and_validate(&tarball).unwrap_err();
         assert_eq!(err.status_code(), 422);
         assert!(matches!(err, TarballError::BadManifest(_)));
@@ -420,10 +414,7 @@ name = "Widget"
 version = "0.1.0"
 abi = 1
 "#;
-        let tarball = make_tarball(&[
-            ("wafer.toml", bad.as_bytes()),
-            ("w.wasm", b"\0asm"),
-        ]);
+        let tarball = make_tarball(&[("wafer.toml", bad.as_bytes()), ("w.wasm", b"\0asm")]);
         let err = parse_and_validate(&tarball).unwrap_err();
         assert_eq!(err.status_code(), 422);
     }
@@ -437,10 +428,7 @@ name = "widget"
 version = "0.1.0"
 abi = 0
 "#;
-        let tarball = make_tarball(&[
-            ("wafer.toml", bad.as_bytes()),
-            ("w.wasm", b"\0asm"),
-        ]);
+        let tarball = make_tarball(&[("wafer.toml", bad.as_bytes()), ("w.wasm", b"\0asm")]);
         assert!(matches!(
             parse_and_validate(&tarball).unwrap_err(),
             TarballError::BadManifest(_)

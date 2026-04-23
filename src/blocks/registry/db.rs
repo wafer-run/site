@@ -127,7 +127,10 @@ fn eq(field: &str, value: serde_json::Value) -> Filter {
 /// `wafer-block-sqlite::service::ensure_table`). So a value round-tripped
 /// from the DB can come back as either `Number(n)` or `String("n")`. Accept
 /// both.
-fn field_i64(data: &std::collections::HashMap<String, serde_json::Value>, key: &str) -> Option<i64> {
+fn field_i64(
+    data: &std::collections::HashMap<String, serde_json::Value>,
+    key: &str,
+) -> Option<i64> {
     match data.get(key)? {
         serde_json::Value::Number(n) => n.as_i64(),
         serde_json::Value::String(s) => s.parse::<i64>().ok(),
@@ -160,11 +163,7 @@ pub async fn find_org_by_name(ctx: &dyn Context, name: &str) -> Result<Option<Re
 }
 
 /// Find a package by `(org_id, name)`. Returns `None` if no row matches.
-pub async fn find_package(
-    ctx: &dyn Context,
-    org_id: &str,
-    name: &str,
-) -> Result<Option<Record>> {
+pub async fn find_package(ctx: &dyn Context, org_id: &str, name: &str) -> Result<Option<Record>> {
     let rows = db::list_all(
         ctx,
         PACKAGES,
@@ -182,10 +181,7 @@ pub async fn find_package(
 /// between backends (TEXT `"0"` vs INTEGER `0` vs BOOLEAN `false`) and a
 /// server-side `yanked = false` filter misses rows on mismatched backends.
 /// `field_bool` handles all three representations.
-pub async fn latest_version_for(
-    ctx: &dyn Context,
-    package_id: &str,
-) -> Result<Option<Record>> {
+pub async fn latest_version_for(ctx: &dyn Context, package_id: &str) -> Result<Option<Record>> {
     let opts = ListOptions {
         filters: vec![eq("package_id", json!(package_id))],
         sort: vec![SortField {
@@ -200,7 +196,10 @@ pub async fn latest_version_for(
     let res = db::list(ctx, VERSIONS, &opts)
         .await
         .map_err(|e| anyhow::anyhow!("latest_version_for({package_id}): {e:?}"))?;
-    Ok(res.records.into_iter().find(|r| !field_bool(&r.data, "yanked")))
+    Ok(res
+        .records
+        .into_iter()
+        .find(|r| !field_bool(&r.data, "yanked")))
 }
 
 /// Browse: list packages matching `query` (case-sensitive `LIKE %q%` on
@@ -312,7 +311,10 @@ pub async fn get_package(
             .get("summary")
             .and_then(|v| v.as_str())
             .map(String::from),
-        versions: versions.into_iter().map(version_summary_from_record).collect(),
+        versions: versions
+            .into_iter()
+            .map(version_summary_from_record)
+            .collect(),
     }))
 }
 
@@ -463,10 +465,7 @@ pub async fn issue_cli_code(ctx: &dyn Context, user_id: &str) -> Result<String> 
 /// - `Ok(None)` when the code is missing, expired, or already used — a flat
 ///   "invalid" signal so the route doesn't leak which condition tripped.
 /// - `Err(...)` only for backend errors.
-pub async fn exchange_cli_code(
-    ctx: &dyn Context,
-    code: &str,
-) -> Result<Option<(String, String)>> {
+pub async fn exchange_cli_code(ctx: &dyn Context, code: &str) -> Result<Option<(String, String)>> {
     let now = now_unix();
 
     // Look up the code row. Absent code => Ok(None). `get_by_field` maps
@@ -762,9 +761,7 @@ fn toml_to_json(v: &toml::Value) -> serde_json::Value {
         toml::Value::Float(f) => json!(f),
         toml::Value::Boolean(b) => json!(b),
         toml::Value::Datetime(d) => json!(d.to_string()),
-        toml::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(toml_to_json).collect())
-        }
+        toml::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(toml_to_json).collect()),
         toml::Value::Table(t) => {
             let mut m = serde_json::Map::new();
             for (k, val) in t {

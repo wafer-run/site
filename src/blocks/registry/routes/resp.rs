@@ -24,10 +24,8 @@ pub fn json_response<T: Serialize>(status: u16, value: &T) -> OutputStream {
             // `T`, so the only way *this* branch fails is an OOM. Accept the
             // trap and emit a minimal hand-rolled body.
             return OutputStream::respond_with_meta(
-                format!(
-                    "{{\"error\":\"internal\",\"message\":\"serialize failed: {e}\"}}"
-                )
-                .into_bytes(),
+                format!("{{\"error\":\"internal\",\"message\":\"serialize failed: {e}\"}}")
+                    .into_bytes(),
                 vec![
                     MetaEntry {
                         key: META_RESP_STATUS.into(),

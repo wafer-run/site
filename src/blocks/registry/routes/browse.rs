@@ -11,10 +11,11 @@ use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
 pub async fn index(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> OutputStream {
     let q = msg.query("q");
     let query_str = if q.is_empty() { "" } else { q };
-    let (packages, total) = match db::list_packages(ctx, if q.is_empty() { None } else { Some(q) }, 1, 50).await {
-        Ok(result) => result,
-        Err(_) => (vec![], 0),
-    };
+    let (packages, total) =
+        match db::list_packages(ctx, if q.is_empty() { None } else { Some(q) }, 1, 50).await {
+            Ok(result) => result,
+            Err(_) => (vec![], 0),
+        };
     let body = templates::browse(&packages, query_str, total).into_string();
     resp::ok_html(&body)
 }
@@ -53,7 +54,11 @@ pub async fn search(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> 
 }
 
 /// GET /registry/{org}/{package} — package detail page.
-pub async fn package_detail(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> OutputStream {
+pub async fn package_detail(
+    ctx: &dyn Context,
+    msg: &Message,
+    _cfg: &RegistryConfig,
+) -> OutputStream {
     let path = msg.path().strip_prefix("/registry/").unwrap_or("");
     let segs: Vec<&str> = path.split('/').collect();
     if segs.len() != 2 {

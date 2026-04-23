@@ -23,9 +23,8 @@ use std::{path::Path, sync::Arc};
 use wafer_block_local_storage::service::LocalStorageService;
 use wafer_core::interfaces::storage::service::StorageService;
 use wafer_run::{
-    Block, BlockCategory, BlockInfo, Context, ErrorCode, InputStream, InstanceMode,
-    LifecycleEvent, Message, MetaEntry, OutputStream, RuntimeError, Wafer, WaferError,
-    META_RESP_CONTENT_TYPE,
+    Block, BlockCategory, BlockInfo, Context, ErrorCode, InputStream, InstanceMode, LifecycleEvent,
+    Message, MetaEntry, OutputStream, RuntimeError, Wafer, WaferError, META_RESP_CONTENT_TYPE,
 };
 
 /// Site content block name. Site-local (not an upstream block) so the
