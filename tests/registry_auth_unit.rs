@@ -118,7 +118,8 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
     let cfg = RegistryConfig {
         admin_email: "admin@example.com".into(),
         storage_key_prefix: "registry".into(),
-     jwt_secret: "test-secret".into(),};
+        jwt_secret: "test-secret".into(),
+    };
 
     let mut msg = Message::new("retrieve");
     msg.set_meta("http.header.authorization", format!("Bearer {raw}"));

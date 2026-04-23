@@ -271,7 +271,8 @@ pub async fn boot_registry_against_memory() -> Arc<InMemoryCtx> {
     let cfg = RegistryConfig {
         admin_email: "test@example.invalid".into(),
         storage_key_prefix: "registry".into(),
-     jwt_secret: "test-secret".into(),};
+        jwt_secret: "test-secret".into(),
+    };
     let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
 
     block
@@ -377,7 +378,8 @@ async fn start_with(
     let cfg = RegistryConfig {
         admin_email: admin_email.into(),
         storage_key_prefix: "registry".into(),
-     jwt_secret: "test-secret".into(),};
+        jwt_secret: "test-secret".into(),
+    };
     let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
 
     // Mirror `RegistryBlock::lifecycle(Init)` as run by the WAFER runtime's

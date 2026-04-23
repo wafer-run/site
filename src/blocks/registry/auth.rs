@@ -130,11 +130,11 @@ fn find_jwt_token(msg: &Message) -> Option<String> {
 /// Verify a JWT against solobase's auth-block derived key, with fallback to
 /// the master secret. Mirrors `solobase_core::crypto::extract_auth_meta`
 /// except we return the claims map instead of mutating message meta.
-fn verify_jwt(token: &str, jwt_secret: &str) -> Option<std::collections::HashMap<String, serde_json::Value>> {
-    let derived = solobase_core::crypto::derive_block_jwt_key(
-        jwt_secret,
-        "suppers-ai/auth",
-    );
+fn verify_jwt(
+    token: &str,
+    jwt_secret: &str,
+) -> Option<std::collections::HashMap<String, serde_json::Value>> {
+    let derived = solobase_core::crypto::derive_block_jwt_key(jwt_secret, "suppers-ai/auth");
     if let Ok(claims) = solobase_core::crypto::jwt_verify(token, &derived) {
         if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
             return Some(claims);
