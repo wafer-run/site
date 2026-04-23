@@ -68,6 +68,40 @@ fn is_not_found(err: &wafer_run::WaferError) -> bool {
     err.code == wafer_run::ErrorCode::NotFound
 }
 
+/// Ensure the storage folder `prefix` exists.
+///
+/// Publish writes `{prefix}/{org}/{name}/{version}.wafer` via
+/// `storage::put`. The LocalStorageService backend `create_dir_all`s on
+/// demand, but S3 has no implicit "folder exists" concept — a fresh bucket
+/// without the top-level prefix configured would surface first-publish
+/// errors in production. Creating the folder on block init sidesteps that.
+///
+/// The call is idempotent in practice: LocalStorageService's
+/// `create_folder` uses `fs::create_dir_all` (succeeds whether or not the
+/// folder exists), and S3-style backends typically surface "already
+/// exists" via an `AlreadyExists` error code. We tolerate any error here
+/// — the worst case is a no-op on a folder that already exists, and the
+/// real failure surface is the subsequent `storage::put` path.
+pub async fn ensure_storage_folder(ctx: &dyn Context, prefix: &str) -> Result<()> {
+    match wafer_core::clients::storage::create_folder(ctx, prefix, false).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Idempotency: on a re-run where the folder already exists,
+            // accept whatever error the backend raises. `LocalStorage`
+            // won't raise (create_dir_all is a no-op); S3-style backends
+            // raise `AlreadyExists` or similar. Logging rather than
+            // propagating keeps block init resilient across both paths.
+            tracing::debug!(
+                prefix,
+                code = ?e.code,
+                message = %e.message,
+                "ensure_storage_folder: folder probably already exists, continuing"
+            );
+            Ok(())
+        }
+    }
+}
+
 // ---- Query helpers --------------------------------------------------------
 //
 // Typed read helpers that back the HTTP route handlers. Every call goes

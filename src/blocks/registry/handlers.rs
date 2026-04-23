@@ -148,6 +148,17 @@ impl Block for RegistryBlock {
                     format!("registry seed: {e}"),
                 )
             })?;
+            // Pre-create the storage folder so the first publish doesn't
+            // race on folder creation. Safe on re-run — the helper
+            // tolerates "already exists" from every backend we care about.
+            db::ensure_storage_folder(ctx, &self.cfg.storage_key_prefix)
+                .await
+                .map_err(|e| {
+                    WaferError::new(
+                        wafer_run::ErrorCode::Internal,
+                        format!("registry storage folder: {e}"),
+                    )
+                })?;
         }
         Ok(())
     }
