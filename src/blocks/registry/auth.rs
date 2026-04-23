@@ -93,8 +93,10 @@ pub async fn require_user(
 }
 
 /// Inline copy of `solobase_core::crypto::derive_block_jwt_key` (currently
-/// private upstream). Remove once solobase exposes the helper — see
-/// solobase PR #24.
+/// `pub(crate)` upstream). TODO(solobase): remove once a solobase release
+/// exposes the helper publicly; replace the call in `verify_jwt` with
+/// `solobase_core::crypto::derive_block_jwt_key` and drop the `hkdf`
+/// direct dep from `Cargo.toml`.
 fn derive_block_jwt_key_local(master_secret: &str, block_id: &str) -> String {
     use hkdf::Hkdf;
     use sha2::Sha256;
