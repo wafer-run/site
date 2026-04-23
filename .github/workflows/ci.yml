@@ -84,6 +84,29 @@ jobs:
       - name: playwright install
         working-directory: site
         run: npx playwright install --with-deps
-      - name: playwright test
+      - name: Start wafer-site server
         working-directory: site
-        run: npx playwright test
+        run: |
+          mkdir -p data
+          SOLOBASE_DB_PATH=./data/ci.sqlite \
+          SOLOBASE_STORAGE_ROOT=./data/storage \
+          SOLOBASE_LISTEN=0.0.0.0:8090 \
+          ./target/release/wafer-site > /tmp/site.log 2>&1 &
+          echo $! > /tmp/site.pid
+          # Wait for HTTP to come up
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:8090/registry/search; then
+              echo "site up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "site failed to start; log:"
+          cat /tmp/site.log
+          exit 1
+      - name: playwright test (registry suite)
+        working-directory: site
+        run: npx playwright test tests/e2e/registry.spec.ts
+      - name: Stop wafer-site server
+        if: always()
+        run: kill $(cat /tmp/site.pid) 2>/dev/null || true
