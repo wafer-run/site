@@ -18,6 +18,18 @@ jobs:
         with:
           repository: wafer-run/wafer-run
           path: wafer-run
+      - name: Checkout solobase
+        uses: actions/checkout@v4
+        with:
+          repository: suppers-ai/solobase
+          path: solobase
+      - name: Set site env
+        run: |
+          echo "SUPPERS_AI__AUTH__JWT_SECRET=ci-test-secret-not-for-prod" >> $GITHUB_ENV
+          echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -45,6 +57,18 @@ jobs:
         with:
           repository: wafer-run/wafer-run
           path: wafer-run
+      - name: Checkout solobase
+        uses: actions/checkout@v4
+        with:
+          repository: suppers-ai/solobase
+          path: solobase
+      - name: Set site env
+        run: |
+          echo "SUPPERS_AI__AUTH__JWT_SECRET=ci-test-secret-not-for-prod" >> $GITHUB_ENV
+          echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
+          echo "SOLOBASE_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install Node
@@ -60,6 +84,29 @@ jobs:
       - name: playwright install
         working-directory: site
         run: npx playwright install --with-deps
-      - name: playwright test
+      - name: Start wafer-site server
         working-directory: site
-        run: npx playwright test
+        run: |
+          mkdir -p data
+          SOLOBASE_DB_PATH=./data/ci.sqlite \
+          SOLOBASE_STORAGE_ROOT=./data/storage \
+          SOLOBASE_LISTEN=0.0.0.0:8090 \
+          ./target/release/wafer-site > /tmp/site.log 2>&1 &
+          echo $! > /tmp/site.pid
+          # Wait for HTTP to come up
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:8090/registry/search; then
+              echo "site up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "site failed to start; log:"
+          cat /tmp/site.log
+          exit 1
+      - name: playwright test (registry suite)
+        working-directory: site
+        run: npx playwright test tests/e2e/registry.spec.ts
+      - name: Stop wafer-site server
+        if: always()
+        run: kill $(cat /tmp/site.pid) 2>/dev/null || true

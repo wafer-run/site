@@ -15,13 +15,43 @@ wafer-block-local-storage = { path = "../wafer-run/crates/wafer-block-local-stor
 wafer-block-config = { path = "../wafer-run/crates/wafer-block-config" }
 wafer-block-logger = { path = "../wafer-run/crates/wafer-block-logger" }
 wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
+
+# Solobase platform — site becomes a solobase-native consumer
+solobase         = { path = "../solobase/crates/solobase" }           # SolobaseBuilder + flows
+solobase-core    = { path = "../solobase/crates/solobase-core" }      # blocks::auth::register
+solobase-native  = { path = "../solobase/crates/solobase-native" }    # make_sqlite_database_service, etc.
+
+# Registry block support
+maud   = "0.26"
+rand   = "0.8"
+hex    = "0.4"
+sha2   = "0.10"
+hkdf   = "0.12"
+tar    = "0.4"
+flate2 = "1"
+semver = "1"
+toml   = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+anyhow = "1"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls", "multipart"] }
+
+[dev-dependencies]
+wafer-block-sqlite         = { path = "../wafer-run/crates/wafer-block-sqlite" }
+wafer-block                = { path = "../wafer-run/crates/wafer-block" }
+wafer-block-http-listener  = { path = "../wafer-run/crates/wafer-block-http-listener" }
+# wafer-block-local-storage is used by tests/common to spin up a real
+# storage block (backed by a tempdir) against which the publish endpoint
+# can exercise `storage::put` / `storage::delete`.
+wafer-block-local-storage  = { path = "../wafer-run/crates/wafer-block-local-storage" }
+axum = "0.8"
+tempfile = "3"
 
 [lints.clippy]
 redundant_clone = "warn"
@@ -33,3 +63,24 @@ manual_let_else = "warn"
 
 [lints.rust]
 unused_must_use = "warn"
+
+[patch."https://github.com/wafer-run/wafer-run"]
+wafer-run                   = { path = "../wafer-run/crates/wafer-run" }
+wafer-block                 = { path = "../wafer-run/crates/wafer-block" }
+wafer-core                  = { path = "../wafer-run/crates/wafer-core" }
+wafer-sql-utils             = { path = "../wafer-run/crates/wafer-sql-utils" }
+wafer-block-config          = { path = "../wafer-run/crates/wafer-block-config" }
+wafer-block-cors            = { path = "../wafer-run/crates/wafer-block-cors" }
+wafer-block-crypto          = { path = "../wafer-run/crates/wafer-block-crypto" }
+wafer-block-fastembed       = { path = "../wafer-run/crates/wafer-block-fastembed" }
+wafer-block-http-listener   = { path = "../wafer-run/crates/wafer-block-http-listener" }
+wafer-block-inspector       = { path = "../wafer-run/crates/wafer-block-inspector" }
+wafer-block-local-storage   = { path = "../wafer-run/crates/wafer-block-local-storage" }
+wafer-block-logger          = { path = "../wafer-run/crates/wafer-block-logger" }
+wafer-block-network         = { path = "../wafer-run/crates/wafer-block-network" }
+wafer-block-postgres        = { path = "../wafer-run/crates/wafer-block-postgres" }
+wafer-block-readonly-guard  = { path = "../wafer-run/crates/wafer-block-readonly-guard" }
+wafer-block-router          = { path = "../wafer-run/crates/wafer-block-router" }
+wafer-block-security-headers = { path = "../wafer-run/crates/wafer-block-security-headers" }
+wafer-block-sqlite          = { path = "../wafer-run/crates/wafer-block-sqlite" }
+wafer-block-web             = { path = "../wafer-run/crates/wafer-block-web" }
