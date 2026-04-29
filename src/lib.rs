@@ -155,15 +155,18 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Disable solobase feature blocks the site doesn't use.
+/// Hide solobase feature blocks the site doesn't surface.
 ///
-/// Leaving them enabled forces their required config vars (e.g.
-/// `SUPPERS_AI__LLM__DEFAULT_MODEL`, `SUPPERS_AI__PROJECTS__CONTROL_PLANE_URL`)
-/// to be set even though nothing here exercises them. We only need `auth`,
-/// `admin`, and the shared infrastructure blocks for Step 2.
+/// `BlockSettings` is consumed by `SolobaseRouterBlock`: when a block is
+/// disabled here, requests to `/b/{block}/**` 404 instead of dispatching.
+/// The blocks are still registered statically (every solobase feature
+/// block self-registers via `register_static_block!`) and their required
+/// config is still validated at start, so this is purely a routing/UX
+/// concern — not a way to suppress missing-config errors.
 ///
-/// `BlockSettings` stores the *full* block name (e.g. `suppers-ai/llm`) and
-/// defaults to enabled. Explicitly set the features we don't want to `false`.
+/// `BlockSettings` stores the *full* block name (e.g. `suppers-ai/llm`)
+/// and defaults to enabled. Explicitly set the features we don't want to
+/// `false`.
 fn block_settings_for_site() -> BlockSettings {
     let mut enabled = HashMap::new();
     for name in [
