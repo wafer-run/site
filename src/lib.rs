@@ -99,6 +99,27 @@ pub async fn run() -> anyhow::Result<()> {
         serde_json::json!({ "allow_anonymous": true }),
     );
 
+    // CSP override: the chrome (`<sa-header>` / `<sa-footer>`) loads from
+    // `https://site-kit.suppers.ai/dist/...`. The default CSP shipped by
+    // `wafer-run/security-headers` only allows `'self'` for scripts and
+    // styles, which blocks the kit. Extend `script-src` and `style-src` to
+    // permit the kit's GitHub-Pages origin. Everything else stays at the
+    // restrictive default.
+    wafer.add_block_config(
+        "wafer-run/security-headers",
+        serde_json::json!({
+            "csp": "default-src 'self'; \
+                    script-src 'self' 'unsafe-inline' https://site-kit.suppers.ai; \
+                    style-src 'self' 'unsafe-inline' https://site-kit.suppers.ai; \
+                    img-src 'self' data: blob: https:; \
+                    font-src 'self' https:; \
+                    connect-src 'self'; \
+                    frame-ancestors 'none'; \
+                    base-uri 'self'; \
+                    form-action 'self'"
+        }),
+    );
+
     // 4b. Registry block stub.
     let jwt_secret = std::env::var("SUPPERS_AI__AUTH__JWT_SECRET")
         .expect("SUPPERS_AI__AUTH__JWT_SECRET required");
