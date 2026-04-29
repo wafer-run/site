@@ -17,8 +17,7 @@ wafer-block-logger = { path = "../wafer-run/crates/wafer-block-logger" }
 wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
 
 # Solobase platform — site becomes a solobase-native consumer
-solobase         = { path = "../solobase/crates/solobase" }           # SolobaseBuilder + flows
-solobase-core    = { path = "../solobase/crates/solobase-core" }      # blocks::auth::register
+solobase-core    = { path = "../solobase/crates/solobase-core" }      # SolobaseBuilder + blocks::auth::register
 solobase-native  = { path = "../solobase/crates/solobase-native" }    # make_sqlite_database_service, etc.
 
 # Registry block support

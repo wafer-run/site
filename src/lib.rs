@@ -10,7 +10,7 @@ pub mod flows;
 
 use std::{collections::HashMap, sync::Arc};
 
-use solobase::builder::{self, SolobaseBuilder};
+use solobase_core::builder::{self, SolobaseBuilder};
 use solobase_core::features::BlockSettings;
 use solobase_native::{
     init_tracing, load_dotenv, register_http_listener, register_observability_hooks,
@@ -97,6 +97,27 @@ pub async fn run() -> anyhow::Result<()> {
     wafer.add_block_config(
         "wafer-run/inspector",
         serde_json::json!({ "allow_anonymous": true }),
+    );
+
+    // CSP override: the chrome (`<sa-header>` / `<sa-footer>`) loads from
+    // `https://site-kit.suppers.ai/dist/...`. The default CSP shipped by
+    // `wafer-run/security-headers` only allows `'self'` for scripts and
+    // styles, which blocks the kit. Extend `script-src` and `style-src` to
+    // permit the kit's GitHub-Pages origin. Everything else stays at the
+    // restrictive default.
+    wafer.add_block_config(
+        "wafer-run/security-headers",
+        serde_json::json!({
+            "csp": "default-src 'self'; \
+                    script-src 'self' 'unsafe-inline' https://site-kit.suppers.ai; \
+                    style-src 'self' 'unsafe-inline' https://site-kit.suppers.ai; \
+                    img-src 'self' data: blob: https:; \
+                    font-src 'self' https:; \
+                    connect-src 'self'; \
+                    frame-ancestors 'none'; \
+                    base-uri 'self'; \
+                    form-action 'self'"
+        }),
     );
 
     // 4b. Registry block stub.
