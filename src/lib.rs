@@ -10,7 +10,7 @@ pub mod flows;
 
 use std::{collections::HashMap, sync::Arc};
 
-use solobase::builder::{self, SolobaseBuilder};
+use solobase_core::builder::{self, SolobaseBuilder};
 use solobase_core::features::BlockSettings;
 use solobase_native::{
     init_tracing, load_dotenv, register_http_listener, register_observability_hooks,
