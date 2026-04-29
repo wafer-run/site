@@ -12,9 +12,16 @@
 
     /* Bridge wafer-local custom-property names to kit tokens.
        Wafer's existing rules use var(--accent), var(--text), etc.;
-       this aliases them so cascade is unified across kit + wafer. */
-    --accent:         var(--sa-accent);
-    --accent-hover:   var(--sa-accent-hover);
+       most are aliased so cascade is unified across kit + wafer.
+
+       Exception: --accent / --accent-hover stay as wafer's original
+       dark blue (--blue-dark / #162d4a). Wafer's CTAs and link
+       rules use these for white-on-blue contrast that passes WCAG.
+       Routing them through --sa-accent (gold) would drop button
+       contrast below 2:1. The kit chrome (sa-header, sa-footer) still
+       uses gold via --sa-accent for brand identity. */
+    --accent:         var(--blue-dark);
+    --accent-hover:   #162d4a;
     --text:           var(--sa-text);
     --text-secondary: var(--sa-text-muted);
     --bg:             var(--sa-bg);
