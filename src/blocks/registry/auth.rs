@@ -92,22 +92,6 @@ pub async fn require_user(
     Err(unauthorized_response())
 }
 
-/// Inline copy of `solobase_core::crypto::derive_block_jwt_key` (currently
-/// `pub(crate)` upstream). TODO(solobase): remove once a solobase release
-/// exposes the helper publicly; replace the call in `verify_jwt` with
-/// `solobase_core::crypto::derive_block_jwt_key` and drop the `hkdf`
-/// direct dep from `Cargo.toml`.
-fn derive_block_jwt_key_local(master_secret: &str, block_id: &str) -> String {
-    use hkdf::Hkdf;
-    use sha2::Sha256;
-
-    let hk = Hkdf::<Sha256>::new(None, master_secret.as_bytes());
-    let info = format!("wafer-jwt|{block_id}");
-    let mut okm = [0u8; 32];
-    hk.expand(info.as_bytes(), &mut okm).expect("HKDF expand");
-    okm.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Find a JWT in the request — either the Authorization Bearer header or
 /// the `auth_token` cookie that solobase's OAuth callback sets.
 fn find_jwt_token(msg: &Message) -> Option<String> {
@@ -137,10 +121,8 @@ fn verify_jwt(
     jwt_secret: &str,
 ) -> Option<std::collections::HashMap<String, serde_json::Value>> {
     // Derived-key signing: solobase's auth block signs JWTs with HKDF-SHA256
-    // of the master secret + block id ("wafer-jwt|suppers-ai/auth"). Mirrors
-    // `solobase_core::crypto::derive_block_jwt_key` so we don't depend on
-    // that fn being pub upstream (it isn't yet on solobase main).
-    let derived = derive_block_jwt_key_local(jwt_secret, "suppers-ai/auth");
+    // of the master secret + block id ("wafer-jwt|suppers-ai/auth").
+    let derived = solobase_core::crypto::derive_block_jwt_key(jwt_secret, "suppers-ai/auth");
     if let Ok(claims) = solobase_core::crypto::jwt_verify(token, &derived) {
         if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
             return Some(claims);
