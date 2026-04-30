@@ -4,6 +4,10 @@
 :root {
     /* Override the kit's default accent for wafer's brand */
     --sa-accent: #FCC450;
+    /* Foreground for content rendered on top of --sa-accent (the kit's
+       sa-hero CTA background uses this). Wafer's gold + the kit's white
+       default = ~1.7:1; pair with dark blue (10.5:1, AAA). */
+    --sa-on-accent: #1e3a5f;
 
     /* Wafer-only colors (no kit equivalent) */
     --wafer:          #FCC450;
