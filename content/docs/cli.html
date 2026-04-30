@@ -150,3 +150,31 @@ BEFORE_BODY_CLOSE: switch_tab_script.html
 
 <h3>Registry integration</h3>
 <p>Packaged <code>dist/</code> directories published as GitHub releases are automatically discoverable by the <a href="/docs/registry">package registry</a>. The registry detects the <code>block.wasm</code> and <code>manifest.json</code> assets and exposes them for install.</p>
+
+<h2 id="dev">wafer dev</h2>
+
+<p>Watches a wafer-run app's source files and restarts the running process on every save. Prints a wafer-aware boot summary on each successful start (block count, flow count, listening address). Use this as your local inner loop instead of manually <code>cargo run</code>-ing after every edit.</p>
+
+<pre><code>wafer dev [--bin NAME] [--release] [--watch PATTERN]... [-- &lt;cargo args&gt;]</code></pre>
+
+<dl>
+  <dt><code>--bin &lt;NAME&gt;</code></dt>
+  <dd>Cargo bin target to run. Auto-detected from <code>Cargo.toml</code> if there's exactly one bin.</dd>
+
+  <dt><code>--release</code></dt>
+  <dd>Pass <code>--release</code> to cargo. Default is dev profile (faster rebuilds).</dd>
+
+  <dt><code>--watch &lt;PATTERN&gt;</code></dt>
+  <dd>Add an extra path or glob to watch. Repeatable. Default watch list: <code>src/**/*.rs</code>, <code>Cargo.toml</code>, <code>wafer.lock</code>.</dd>
+
+  <dt><code>--no-default-watch</code></dt>
+  <dd>Disable the default watch list (use only <code>--watch</code> patterns).</dd>
+
+  <dt><code>--debounce &lt;MS&gt;</code></dt>
+  <dd>File-change debounce window in milliseconds. Default 200.</dd>
+
+  <dt><code>--kill-timeout &lt;SEC&gt;</code></dt>
+  <dd>SIGTERM &rarr; SIGKILL grace period. Default 3.</dd>
+</dl>
+
+<p>The boot summary requires the runtime's structured <code>wafer.runtime</code> tracing events (added in Spec 3B). Apps using older runtime versions still work — <code>wafer dev</code> falls back to omitting per-spawn counts.</p>
