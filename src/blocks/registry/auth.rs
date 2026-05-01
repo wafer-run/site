@@ -205,9 +205,8 @@ fn coming_soon_response(msg: &Message) -> OutputStream {
 }
 
 fn auth_method_required_response(msg: &Message, required: &str) -> OutputStream {
-    let message = format!(
-        "Admin actions require signing in via {required}. Re-authenticate and retry."
-    );
+    let message =
+        format!("Admin actions require signing in via {required}. Re-authenticate and retry.");
     let accept = msg.header("accept");
     if accept.contains("text/html") {
         resp::html_response(
