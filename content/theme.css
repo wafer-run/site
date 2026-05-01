@@ -34,6 +34,25 @@ html { font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11'; }
     border-radius: 2px;
 }
 
+/* Keyboard-only "skip to content" link. Sits offscreen until focused,
+   then snaps into view at the top-left so a Tab-press reveals it. */
+.skip-link {
+    position: absolute;
+    top: 0; left: 0;
+    transform: translateY(-100%);
+    background: #000; color: #fff;
+    padding: 0.6rem 1rem;
+    text-decoration: none; font-weight: 500;
+    border-radius: 0 0 6px 0;
+    z-index: 10000;
+    transition: transform 0.15s;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+    transform: translateY(0);
+    color: #fff;
+}
+
 /* Light-DOM rules win over the kit's shadow-DOM ::slotted(a). Strip
    the global underline from links slotted into sa-header / sa-footer. */
 sa-header a, sa-footer a { text-decoration: none; }

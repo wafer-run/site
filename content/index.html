@@ -46,8 +46,9 @@
             border-color: #000; transform: translateY(-1px);
         }
         .hero h1 {
-            font-size: 3.5rem; font-weight: 700;
-            letter-spacing: -0.02em; margin-bottom: 0.5rem;
+            font-size: 3rem; font-weight: 700;
+            letter-spacing: -0.025em; line-height: 1.1;
+            margin-bottom: 0.5rem;
         }
         .hero-wafer { color: var(--wafer); }
         .hero-run { color: var(--blue-dark); }
@@ -85,8 +86,8 @@
             letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 0.5rem;
         }
         .pillar-text h2 {
-            font-size: 1.8rem; color: var(--text); margin-bottom: 0.75rem;
-            line-height: 1.3;
+            font-size: 2rem; color: var(--text); margin-bottom: 0.75rem;
+            line-height: 1.2; letter-spacing: -0.015em;
         }
         .pillar-text p {
             font-size: 1rem; color: var(--text-secondary); line-height: 1.7;
@@ -112,14 +113,17 @@
             margin: 0; background: none; box-shadow: none; padding: 0;
             font-size: 0.82rem; line-height: 1.7;
         }
-        .pillar-visual .dim { color: #6b7280; }
-        .pillar-visual .kw { color: #c586c0; }
-        .pillar-visual .fn { color: #dcdcaa; }
-        .pillar-visual .str { color: #ce9178; }
-        .pillar-visual .type { color: #4ec9b0; }
-        .pillar-visual .comment { color: #6a9955; }
-        .pillar-visual .num { color: #b5cea8; }
-        .pillar-visual .attr { color: #9cdcfe; }
+        /* Code panels: monochrome with weight/italic for emphasis. The
+           dark backgrounds keep readability; grayscale tokens stay on
+           the B&W palette without losing structure. */
+        .pillar-visual .dim     { color: #6b7280; }
+        .pillar-visual .kw      { color: #f3f4f6; font-weight: 700; }
+        .pillar-visual .fn      { color: #e5e7eb; }
+        .pillar-visual .str     { color: #d1d5db; }
+        .pillar-visual .type    { color: #f3f4f6; font-weight: 600; }
+        .pillar-visual .comment { color: #6b7280; font-style: italic; }
+        .pillar-visual .num     { color: #d1d5db; }
+        .pillar-visual .attr    { color: #d1d5db; }
         .pillar-visual .title {
             font-size: 0.7rem; color: #6b7280; text-transform: uppercase;
             letter-spacing: 0.05em; margin-bottom: 0.75rem; display: block;
@@ -128,7 +132,8 @@
         /* CTA */
         .cta { text-align: center; padding: 3rem 1.5rem 4rem; }
         .cta h2 {
-            font-size: 1.6rem; color: var(--text); margin-bottom: 0.5rem;
+            font-size: 1.5rem; color: var(--text); margin-bottom: 0.5rem;
+            letter-spacing: -0.01em;
         }
         .cta p {
             color: var(--text-secondary); margin-bottom: 1.5rem;
@@ -210,17 +215,23 @@
 
         /* Responsive */
         @media (max-width: 768px) {
-            .hero h1 { font-size: 2.5rem; }
-            .intro-tagline { font-size: 1.15rem; }
+            .hero { padding: 3rem 1.25rem 2.5rem; }
+            .hero h1 { font-size: 2.25rem; }
+            .hero-tagline { font-size: 1.1rem; }
+            .hero-sub { font-size: 1rem; }
+            .pillar-text h2 { font-size: 1.5rem; }
             .pillar {
                 grid-template-columns: 1fr; gap: 1.5rem;
             }
             .pillar.reverse .pillar-text { order: 1; }
             .pillar.reverse .pillar-visual { order: 2; }
+            .pillars { padding: 2rem 1.25rem 1rem; }
+            .cta { padding: 2.5rem 1.25rem 3.5rem; }
         }
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <sa-header>
         <a slot="brand" href="/">
             <span class="brand-mark" aria-hidden="true">W</span>
@@ -235,7 +246,7 @@
     </sa-header>
 
     <!-- Hero -->
-    <div class="hero">
+    <div id="main-content" class="hero">
         <div class="hero-mark" aria-hidden="true">W</div>
         <h1><span class="hero-wafer">wafer</span><span class="hero-run">.run</span></h1>
         <p class="hero-acronym">WebAssembly Architecture for Flow Execution & Routing</p>
