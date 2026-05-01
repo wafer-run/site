@@ -94,8 +94,10 @@ fn main() {
         }
     }
 
-    // Copy non-doc content pages to both OUT_DIR and dist/
-    for name in &["index.html", "theme.css"] {
+    // Copy non-doc content pages to both OUT_DIR and dist/.
+    // playground.html ships with the static catch-all (wafer-site/content)
+    // — no dedicated block.
+    for name in &["index.html", "playground.html", "theme.css"] {
         let src = content_dir.join(name);
         if src.exists() {
             // OUT_DIR
@@ -110,12 +112,11 @@ fn main() {
         }
     }
 
-    // playground.html and registry.html only to OUT_DIR (served by their own blocks)
-    for name in &["playground.html", "registry.html"] {
-        let src = content_dir.join(name);
-        if src.exists() {
-            let _ = fs::copy(&src, out_content_dir.join(name));
-        }
+    // registry.html only to OUT_DIR — wafer-run/registry renders via maud
+    // templates, so the file is unused at runtime but kept for reference.
+    let registry_src = content_dir.join("registry.html");
+    if registry_src.exists() {
+        let _ = fs::copy(&registry_src, out_content_dir.join("registry.html"));
     }
 
     // Copy public/ assets to dist/
