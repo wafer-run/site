@@ -31,6 +31,7 @@ fn test_cfg() -> RegistryConfig {
         admin_email: "admin@example.com".into(),
         storage_key_prefix: "registry".into(),
         jwt_secret: "test-secret".into(),
+        required_auth_method: String::new(),
     }
 }
 
@@ -119,6 +120,7 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
         admin_email: "admin@example.com".into(),
         storage_key_prefix: "registry".into(),
         jwt_secret: "test-secret".into(),
+        required_auth_method: String::new(),
     };
 
     let mut msg = Message::new("retrieve");

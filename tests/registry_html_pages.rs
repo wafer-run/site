@@ -18,8 +18,8 @@ async fn browse_empty_renders_empty_state() {
     assert_eq!(resp.status(), 200);
     let body = resp.text().await.expect("read response body");
     assert!(
-        body.contains("No packages published yet."),
-        "expected 'No packages published yet.' in body, got: {body}"
+        body.contains("No packages published yet"),
+        "expected 'No packages published yet' in body, got: {body}"
     );
 }
 
