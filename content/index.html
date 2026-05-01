@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://site-kit.suppers.ai/dist/design-system.css">
     <script type="module" src="https://site-kit.suppers.ai/dist/components/sa-header.js"></script>
     <script type="module" src="https://site-kit.suppers.ai/dist/components/sa-footer.js"></script>
-    <link rel="icon" href="/favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/css/theme.css">
     <style>
         /* Hero */
@@ -16,9 +16,34 @@
             padding: 4rem 1.5rem 3rem;
             background: var(--bg-white);
         }
-        .hero-logo {
-            width: 8rem; height: auto; border-radius: 1rem;
-            margin: 0 auto 1.5rem; display: block;
+        .hero-mark {
+            width: 3.5rem; height: 3.5rem; margin: 0 auto 1.25rem;
+            background: #000; border-radius: 0.75rem;
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-weight: 700; font-size: 2rem;
+            letter-spacing: -0.02em; line-height: 1;
+        }
+        .hero-cta {
+            display: flex; justify-content: center; gap: 0.75rem;
+            flex-wrap: wrap; margin-top: 1.75rem;
+        }
+        .hero-cta a {
+            display: inline-block; padding: 0.7rem 1.5rem;
+            border-radius: 0.5rem; text-decoration: none;
+            font-weight: 600; font-size: 0.95rem; transition: all 0.15s;
+        }
+        .hero-cta .primary {
+            background: #000; color: #fff; border: 1px solid #000;
+        }
+        .hero-cta .primary:hover {
+            background: #1a1a1a; transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .hero-cta .secondary {
+            background: #fff; color: #000; border: 1px solid var(--border);
+        }
+        .hero-cta .secondary:hover {
+            border-color: #000; transform: translateY(-1px);
         }
         .hero h1 {
             font-size: 3.5rem; font-weight: 700;
@@ -56,8 +81,8 @@
         .pillar.reverse .pillar-text { order: 2; }
         .pillar.reverse .pillar-visual { order: 1; }
         .pillar-tag {
-            font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.08em; color: var(--wafer); margin-bottom: 0.5rem;
+            font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 0.5rem;
         }
         .pillar-text h2 {
             font-size: 1.8rem; color: var(--text); margin-bottom: 0.75rem;
@@ -139,7 +164,7 @@
         }
         .cta-primary:hover {
             background: var(--accent-hover); color: white;
-            transform: translateY(-1px); box-shadow: 0 4px 12px rgba(30,58,95,0.3);
+            transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
         .cta-secondary {
             background: var(--bg-white); color: var(--accent);
@@ -152,7 +177,7 @@
 
         /* Inspector CTA */
         .inspector-cta {
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            background: linear-gradient(135deg, #171717 0%, #000 100%);
             padding: 3.5rem 1.5rem;
             text-align: center;
         }
@@ -161,26 +186,26 @@
         }
         .inspector-cta-icon {
             width: 3rem; height: 3rem; margin: 0 auto 1.25rem;
-            background: rgba(252, 196, 80, 0.12); border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08); border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
         }
-        .inspector-cta-icon svg { width: 1.5rem; height: 1.5rem; fill: var(--wafer); }
+        .inspector-cta-icon svg { width: 1.5rem; height: 1.5rem; fill: #fff; }
         .inspector-cta-text h3 {
             font-size: 1.4rem; color: #f1f5f9; margin-bottom: 0.5rem;
         }
         .inspector-cta-text p {
-            font-size: 1rem; color: #94a3b8; line-height: 1.7; margin-bottom: 1.5rem;
+            font-size: 1rem; color: #cbd5e0; line-height: 1.7; margin-bottom: 1.5rem;
         }
         .inspector-cta .cta-primary {
             background: transparent; color: #e2e8f0; font-weight: 600;
-            border: 1px solid #334155; border-radius: 0.5rem;
+            border: 1px solid #404040; border-radius: 0.5rem;
             padding: 0.7rem 1.75rem; text-decoration: none;
             display: inline-flex; align-items: center; gap: 0.5rem;
             transition: all 0.2s;
         }
         .inspector-cta .cta-primary:hover {
-            border-color: var(--wafer); color: var(--wafer);
-            transform: translateY(-1px); box-shadow: 0 4px 16px rgba(252, 196, 80, 0.15);
+            border-color: #fff; color: #fff;
+            transform: translateY(-1px); box-shadow: 0 4px 16px rgba(255, 255, 255, 0.15);
         }
 
         /* Responsive */
@@ -198,14 +223,12 @@
 <body>
     <sa-header>
         <a slot="brand" href="/">
-            <img src="/images/logo.webp" alt="" style="height: 24px; vertical-align: middle; margin-right: var(--sa-space-2);">
-            <span style="font-weight: 600; color: var(--sa-text);">wafer<span style="color: var(--blue-dark);">.run</span></span>
+            <span class="brand-mark" aria-hidden="true">W</span>
+            <span>wafer<span style="color: var(--text-secondary);">.run</span></span>
         </a>
-        <nav slot="nav">
-            <a href="/docs">Docs</a>
-            <a href="/playground">Playground</a>
-            <a href="/registry">Registry</a>
-        </nav>
+        <a slot="actions" href="/docs">Docs</a>
+        <a slot="actions" href="/playground">Playground</a>
+        <a slot="actions" href="/registry">Registry</a>
         <a slot="actions" href="https://github.com/wafer-run/wafer-run" target="_blank" rel="noopener" aria-label="GitHub" style="display: flex; align-items: center; color: var(--sa-text);">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         </a>
@@ -213,7 +236,7 @@
 
     <!-- Hero -->
     <div class="hero">
-        <img class="hero-logo" src="/images/logo.webp" alt="wafer.run logo">
+        <div class="hero-mark" aria-hidden="true">W</div>
         <h1><span class="hero-wafer">wafer</span><span class="hero-run">.run</span></h1>
         <p class="hero-acronym">WebAssembly Architecture for Flow Execution & Routing</p>
         <p class="hero-tagline">The wafer thin runtime for tools, apps, and services</p>
@@ -221,6 +244,10 @@
             Ship secure, sandboxed programs in a single binary. No Docker. No VMs.
             Just WebAssembly, a tiny runtime, and your code.
         </p>
+        <div class="hero-cta">
+            <a class="primary" href="/docs">Get started</a>
+            <a class="secondary" href="/playground">Try the playground</a>
+        </div>
         <div class="social-links">
             <a href="https://github.com/wafer-run/wafer-run" target="_blank" rel="noopener" aria-label="GitHub">
                 <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -393,12 +420,10 @@
             <strong style="font-weight: 600; color: var(--sa-text);">wafer<span style="color: var(--blue-dark);">.run</span></strong>
             <p style="margin: var(--sa-space-1) 0 0; color: var(--sa-text-muted); font-size: var(--sa-text-sm);">The wafer thin runtime for tools, apps, and services.</p>
         </div>
-        <nav slot="links">
-            <a href="/docs">Docs</a>
-            <a href="/playground">Playground</a>
-            <a href="/registry">Registry</a>
-            <a href="https://github.com/wafer-run/wafer-run" target="_blank" rel="noopener">GitHub</a>
-        </nav>
+        <a slot="links" href="/docs">Docs</a>
+        <a slot="links" href="/playground">Playground</a>
+        <a slot="links" href="/registry">Registry</a>
+        <a slot="links" href="https://github.com/wafer-run/wafer-run" target="_blank" rel="noopener">GitHub</a>
         <span slot="copyright">© 2026 wafer.run · MIT licensed</span>
     </sa-footer>
 </body>

@@ -129,6 +129,8 @@ pub async fn run() -> anyhow::Result<()> {
             .expect("WAFER_RUN__REGISTRY__ADMIN_EMAIL required"),
         storage_key_prefix: std::env::var("WAFER_RUN__REGISTRY__STORAGE_KEY_PREFIX")
             .unwrap_or_else(|_| "registry".into()),
+        required_auth_method: std::env::var("WAFER_RUN__REGISTRY__REQUIRED_AUTH_METHOD")
+            .unwrap_or_default(),
     };
     blocks::registry::register(&mut wafer, registry_cfg)?;
 

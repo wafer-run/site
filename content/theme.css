@@ -1,31 +1,19 @@
-/* wafer.run — common theme
-   Palette: warm wafer tones + dark blue */
+/* wafer.run — common theme (plain black & white) */
 
 :root {
-    /* Override the kit's default accent for wafer's brand */
-    --sa-accent: #FCC450;
-    /* Foreground for content rendered on top of --sa-accent (the kit's
-       sa-hero CTA background uses this). Wafer's gold + the kit's white
-       default = ~1.7:1; pair with dark blue (10.5:1, AAA). */
-    --sa-on-accent: #1e3a5f;
+    /* Inter is shipped by site-kit (self-hosted woff2). Override the kit's
+       default --sa-font-sans (Itim) for wafer's professional look. */
+    --sa-font-sans:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 
-    /* Wafer-only colors (no kit equivalent) */
-    --wafer:          #FCC450;
-    --wafer-cream:    #FFF8F0;
-    --blue-dark:      #1e3a5f;
+    --sa-accent:      #000;
+    --sa-on-accent:   #fff;
 
-    /* Bridge wafer-local custom-property names to kit tokens.
-       Wafer's existing rules use var(--accent), var(--text), etc.;
-       most are aliased so cascade is unified across kit + wafer.
+    --wafer:          #000;
+    --wafer-cream:    #f5f5f5;
+    --blue-dark:      #000;
 
-       Exception: --accent / --accent-hover stay as wafer's original
-       dark blue (--blue-dark / #162d4a). Wafer's CTAs and link
-       rules use these for white-on-blue contrast that passes WCAG.
-       Routing them through --sa-accent (gold) would drop button
-       contrast below 2:1. The kit chrome (sa-header, sa-footer) still
-       uses gold via --sa-accent for brand identity. */
-    --accent:         var(--blue-dark);
-    --accent-hover:   #162d4a;
+    --accent:         #000;
+    --accent-hover:   #333;
     --text:           var(--sa-text);
     --text-secondary: var(--sa-text-muted);
     --bg:             var(--sa-bg);
@@ -36,13 +24,64 @@
     --code-block-fg:  var(--sa-code-block-fg);
 }
 
-/* ─── Reset ──────────────────────────────────────────────── */
-/* Kit's design-system.css owns the universal reset, body styling, and
-   font-family defaults. Wafer keeps only the form-element font
-   inheritance rule, which the kit doesn't address. */
 input, select, button, textarea { font-family: inherit; }
 
-/* ─── Page title banner ──────────────────────────────────── */
+html { font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11'; }
+
+:focus-visible {
+    outline: 2px solid #000;
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* Light-DOM rules win over the kit's shadow-DOM ::slotted(a). Strip
+   the global underline from links slotted into sa-header / sa-footer. */
+sa-header a, sa-footer a { text-decoration: none; }
+
+/* Header chrome — comfortable hit areas, subtle hover, brand emphasis. */
+sa-header a[slot="actions"] {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text);
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+}
+sa-header a[slot="actions"]:hover {
+    background: #f5f5f5;
+    color: #000;
+}
+sa-header a[slot="actions"][aria-label="GitHub"] {
+    padding: 0.4rem;
+    margin-left: 0.25rem;
+    color: var(--text-secondary);
+}
+sa-header a[slot="actions"][aria-label="GitHub"]:hover {
+    background: #f5f5f5;
+    color: #000;
+}
+sa-header a[slot="brand"] {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+sa-header .brand-mark {
+    width: 1.5rem; height: 1.5rem;
+    background: #000;
+    color: #fff;
+    border-radius: 0.35rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.95rem; line-height: 1;
+}
+.inspector-cta :focus-visible,
+.cta-primary:focus-visible {
+    outline-color: #fff;
+}
+
 .page-title {
     background: linear-gradient(135deg, var(--wafer-cream) 0%, var(--bg-white) 100%);
     padding: 2rem 1.5rem; text-align: center;
@@ -50,7 +89,6 @@ input, select, button, textarea { font-family: inherit; }
 .page-title h1 { font-size: 2rem; color: var(--text); margin-bottom: 0.25rem; }
 .page-title p { color: var(--text-secondary); }
 
-/* ─── Common typography ──────────────────────────────────── */
 a { color: var(--accent); }
 a:hover { color: var(--accent-hover); }
 
@@ -63,4 +101,104 @@ pre {
     padding: 1rem 1.25rem; border-radius: 0.5rem; overflow-x: auto;
     margin: 1rem 0; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     font-size: 0.85rem; line-height: 1.6;
+}
+
+/* ─── Registry pages ─────────────────────────────────────── */
+.registry-container {
+    max-width: 56rem; margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+}
+.registry-container h2 {
+    font-size: 1.1rem; font-weight: 600;
+    margin: 2rem 0 0.75rem; color: var(--text);
+}
+.registry-container h2:first-child { margin-top: 0; }
+
+.registry-search {
+    display: flex; gap: 0.5rem; margin-bottom: 2rem;
+}
+.registry-search input[type="search"] {
+    flex: 1; padding: 0.7rem 1rem;
+    border: 1px solid var(--border); border-radius: 0.5rem;
+    font-size: 1rem; background: var(--bg-white); color: var(--text);
+}
+.registry-search input[type="search"]:focus {
+    outline: none; border-color: #000;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.08);
+}
+.registry-search button {
+    padding: 0.7rem 1.25rem;
+    background: #000; color: #fff;
+    border: 1px solid #000; border-radius: 0.5rem;
+    font-weight: 500; font-size: 0.95rem; cursor: pointer;
+    transition: background 0.15s;
+}
+.registry-search button:hover { background: #1a1a1a; }
+
+.registry-empty {
+    text-align: center; padding: 3rem 1.5rem;
+    background: var(--bg-white); border: 1px solid var(--border);
+    border-radius: 0.75rem;
+}
+.registry-empty h1, .registry-empty h2 {
+    font-size: 1.5rem; margin-bottom: 0.75rem; color: var(--text);
+}
+.registry-empty > p {
+    color: var(--text-secondary); margin-bottom: 1rem;
+    max-width: 32rem; margin-left: auto; margin-right: auto;
+}
+.registry-empty pre {
+    max-width: 24rem; margin: 1rem auto; text-align: left;
+}
+
+.registry-count {
+    color: var(--text-secondary); font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+.registry-list { list-style: none; padding: 0; margin: 0; }
+.registry-item {
+    background: var(--bg-white); border: 1px solid var(--border);
+    border-radius: 0.5rem; padding: 1.25rem;
+    margin-bottom: 0.75rem; transition: border-color 0.15s;
+}
+.registry-item:hover { border-color: #000; }
+.registry-item-link {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; text-decoration: none; color: inherit;
+}
+.registry-item-name { font-size: 1.05rem; }
+.registry-org { color: var(--text-secondary); font-weight: 400; }
+.registry-item-name strong { color: var(--text); font-weight: 600; }
+.registry-version {
+    font-size: 0.8rem; color: var(--text-secondary);
+    font-family: var(--sa-font-mono); flex-shrink: 0;
+}
+.registry-item-summary {
+    margin-top: 0.5rem; color: var(--text-secondary);
+    font-size: 0.9rem; line-height: 1.5;
+}
+
+.registry-versions {
+    width: 100%; border-collapse: collapse;
+    background: var(--bg-white); border: 1px solid var(--border);
+    border-radius: 0.5rem; overflow: hidden; font-size: 0.9rem;
+}
+.registry-versions th, .registry-versions td {
+    text-align: left; padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+}
+.registry-versions th {
+    background: #fafafa; font-weight: 500;
+    color: var(--text-secondary); font-size: 0.8rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
+}
+.registry-versions tr:last-child td { border-bottom: none; }
+.registry-yanked {
+    color: var(--text-secondary); font-size: 0.75rem;
+    font-weight: 600; letter-spacing: 0.05em;
+}
+
+.cli-code {
+    font-family: var(--sa-font-mono); font-size: 0.95rem;
+    text-align: center; word-break: break-all;
 }

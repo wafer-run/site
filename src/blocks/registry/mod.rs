@@ -38,6 +38,18 @@ pub struct RegistryConfig {
     /// `/b/**` routes, but `/registry/**` is routed directly from our
     /// site-main flow and bypasses that middleware.
     pub jwt_secret: String,
+
+    /// If non-empty, admin-gated routes additionally require the JWT's
+    /// `auth_method` claim to match this value (e.g. `"oauth.github"`).
+    /// Empty disables the check (any solobase-authenticated admin email
+    /// is accepted — legacy behavior).
+    ///
+    /// The motivation is identity-assurance: an OAuth-issued token proves
+    /// the IdP has verified the email, while a password-login token does
+    /// not. For privileged actions like publishing, requiring OAuth keeps
+    /// an attacker who cracked the admin password out unless they also
+    /// own the linked GitHub account.
+    pub required_auth_method: String,
 }
 
 /// Register the `wafer-run/registry` block with route dispatch.
