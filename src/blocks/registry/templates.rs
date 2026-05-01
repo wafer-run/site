@@ -27,19 +27,12 @@ pub fn layout(title: &str, body: Markup) -> Markup {
             body {
                 sa-header {
                     a slot="brand" href="/" {
-                        span style="font-weight: 600; color: var(--sa-text);" {
-                            "wafer" span style="color: var(--blue-dark);" { ".run" }
-                        }
+                        span class="brand-mark" aria-hidden="true" { "W" }
+                        span { "wafer" span style="color: var(--text-secondary);" { ".run" } }
                     }
-                    nav slot="nav" {
-                        a href="/docs" { "Docs" }
-                        a href="/playground" { "Playground" }
-                        a href="/registry" { "Registry" }
-                    }
-                    a slot="actions" href="/b/auth/login"
-                        style="color: var(--sa-text);" { "Log in" }
-                    a slot="actions" href="/registry/cli-login"
-                        style="color: var(--sa-text);" { "CLI" }
+                    a slot="actions" href="/docs" { "Docs" }
+                    a slot="actions" href="/playground" { "Playground" }
+                    a slot="actions" href="/registry" { "Registry" }
                     a slot="actions" href="https://github.com/wafer-run/wafer-run"
                         target="_blank" rel="noopener" aria-label="GitHub"
                         style="display: flex; align-items: center; color: var(--sa-text);" {
@@ -48,10 +41,23 @@ pub fn layout(title: &str, body: Markup) -> Markup {
                         }
                     }
                 }
-                main class="sa-container" style="padding-block: var(--sa-space-8);" {
-                    (body)
+                main { (body) }
+                sa-footer {
+                    div slot="brand" {
+                        strong style="font-weight: 600; color: var(--sa-text);" {
+                            "wafer" span style="color: var(--text-secondary);" { ".run" }
+                        }
+                        p style="margin: var(--sa-space-1) 0 0; color: var(--sa-text-muted); font-size: var(--sa-text-sm);" {
+                            "The wafer thin runtime for tools, apps, and services."
+                        }
+                    }
+                    a slot="links" href="/docs" { "Docs" }
+                    a slot="links" href="/playground" { "Playground" }
+                    a slot="links" href="/registry" { "Registry" }
+                    a slot="links" href="https://github.com/wafer-run/wafer-run"
+                        target="_blank" rel="noopener" { "GitHub" }
+                    span slot="copyright" { "© 2026 wafer.run · MIT licensed" }
                 }
-                sa-footer {}
             }
         }
     }
@@ -62,25 +68,48 @@ pub fn browse(packages: &[PackageSummary], query: &str, total: i64) -> Markup {
     layout(
         "Registry",
         html! {
-            h1 { "Package Registry" }
-            form method="get" action="/registry" {
-                input type="search" name="q" value=(query) placeholder="search packages";
-                button type="submit" { "Search" }
+            div class="page-title" {
+                h1 { "Package Registry" }
+                p { "Discover and install wafer blocks, flows, and interfaces" }
             }
-            @if packages.is_empty() {
-                p.empty { "No packages published yet." }
-            } @else {
-                p { (total) " packages" }
-                ul.packages {
-                    @for p in packages {
-                        li {
-                            a href={ "/registry/" (p.org) "/" (p.name) } {
-                                strong { (p.org) "/" (p.name) }
-                                @if let Some(latest) = &p.latest {
-                                    span.version { "@" (latest) }
+            div class="registry-container" {
+                form class="registry-search" method="get" action="/registry" {
+                    input type="search" name="q" value=(query)
+                        placeholder="Search packages…" autocomplete="off";
+                    button type="submit" { "Search" }
+                }
+                @if packages.is_empty() && query.is_empty() {
+                    div class="registry-empty" {
+                        h2 { "No packages published yet" }
+                        p { "Be the first to publish. Authenticate the CLI, then push a release:" }
+                        pre { code { "wafer publish ./my-block" } }
+                        p {
+                            "See the "
+                            a href="/docs/registry" { "registry docs" }
+                            " for publishing details."
+                        }
+                    }
+                } @else if packages.is_empty() {
+                    div class="registry-empty" {
+                        h2 { "No matches for “" (query) "”" }
+                        p { "Try a broader query, or " a href="/registry" { "browse all packages" } "." }
+                    }
+                } @else {
+                    p class="registry-count" { (total) " package" @if total != 1 { "s" } }
+                    ul class="registry-list" {
+                        @for p in packages {
+                            li class="registry-item" {
+                                a class="registry-item-link" href={ "/registry/" (p.org) "/" (p.name) } {
+                                    span class="registry-item-name" {
+                                        span class="registry-org" { (p.org) "/" }
+                                        strong { (p.name) }
+                                    }
+                                    @if let Some(latest) = &p.latest {
+                                        span class="registry-version" { "v" (latest) }
+                                    }
                                 }
+                                @if let Some(s) = &p.summary { p class="registry-item-summary" { (s) } }
                             }
-                            @if let Some(s) = &p.summary { p.summary { (s) } }
                         }
                     }
                 }
@@ -94,33 +123,37 @@ pub fn package_detail(pkg: &PackageDetail) -> Markup {
     layout(
         &format!("{}/{}", pkg.org, pkg.name),
         html! {
-            h1 { (pkg.org) "/" (pkg.name) }
-            @if let Some(s) = &pkg.summary { p.summary { (s) } }
-            h2 { "Versions" }
-            table.versions {
-                thead { tr { th { "Version" } th { "ABI" } th { "Size" } th { "Published" } th { "" } } }
-                tbody {
-                    @for v in &pkg.versions {
-                        tr {
-                            td { (v.version) }
-                            td { (v.abi) }
-                            td { (v.size_bytes) " bytes" }
-                            td { (v.published_at) }
-                            td {
-                                @if v.yanked == 1 {
-                                    span.yanked { "YANKED" }
-                                } @else {
-                                    a href={
-                                        "/registry/download/" (pkg.org) "/" (pkg.name) "/" (v.version) ".wafer"
-                                    } { "Download" }
+            div class="page-title" {
+                h1 { (pkg.org) "/" (pkg.name) }
+                @if let Some(s) = &pkg.summary { p { (s) } }
+            }
+            div class="registry-container" {
+                h2 { "Install" }
+                pre { code { "wafer install " (pkg.org) "/" (pkg.name) } }
+                h2 { "Versions" }
+                table class="registry-versions" {
+                    thead { tr { th { "Version" } th { "ABI" } th { "Size" } th { "Published" } th { "" } } }
+                    tbody {
+                        @for v in &pkg.versions {
+                            tr {
+                                td { "v" (v.version) }
+                                td { (v.abi) }
+                                td { (v.size_bytes) " bytes" }
+                                td { (v.published_at) }
+                                td {
+                                    @if v.yanked == 1 {
+                                        span class="registry-yanked" { "YANKED" }
+                                    } @else {
+                                        a href={
+                                            "/registry/download/" (pkg.org) "/" (pkg.name) "/" (v.version) ".wafer"
+                                        } { "Download" }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            h2 { "Install" }
-            pre { code { "wafer install " (pkg.org) "/" (pkg.name) } }
         },
     )
 }
@@ -130,9 +163,11 @@ pub fn not_found(what: &str) -> Markup {
     layout(
         "Not Found",
         html! {
-            h1 { "404" }
-            p { (what) " not found." }
-            p { a href="/registry" { "Back to registry" } }
+            div class="registry-container registry-empty" {
+                h1 { "404" }
+                p { (what) " not found." }
+                p { a href="/registry" { "← Back to registry" } }
+            }
         },
     )
 }
@@ -141,15 +176,19 @@ pub fn not_found(what: &str) -> Markup {
 ///
 /// Admin-only: rendered after `require_admin` passes and a fresh code has
 /// been issued via `db::issue_cli_code`. The `<pre>` wrapping makes copying
-/// the 64-hex-char code trivial; `.subtle` dims the single-use reminder.
+/// the 64-hex-char code trivial.
 pub fn cli_login_code(code: &str) -> Markup {
     layout(
         "CLI Login",
         html! {
-            h1 { "CLI Login" }
-            p { "Paste this code into your CLI prompt. Valid for 15 minutes." }
-            pre.cli-code { code { (code) } }
-            p.subtle { "This code is single-use." }
+            div class="page-title" {
+                h1 { "CLI Login" }
+                p { "Paste this code into your CLI prompt. Valid for 15 minutes." }
+            }
+            div class="registry-container" {
+                pre class="cli-code" { code { (code) } }
+                p style="color: var(--text-secondary);" { "This code is single-use." }
+            }
         },
     )
 }
@@ -159,7 +198,7 @@ pub fn coming_soon() -> Markup {
     layout(
         "Coming Soon",
         html! {
-            div.coming-soon {
+            div class="registry-container registry-empty" {
                 h1 { "Publishing is coming soon" }
                 p { "Publishing is not yet open to other users. Admins can continue via the CLI." }
             }
