@@ -25,6 +25,7 @@ pub fn layout(title: &str, body: Markup) -> Markup {
                 link rel="stylesheet" href="/css/theme.css";
             }
             body {
+                a class="skip-link" href="#main-content" { "Skip to content" }
                 sa-header {
                     a slot="brand" href="/" {
                         span class="brand-mark" aria-hidden="true" { "W" }
@@ -41,7 +42,7 @@ pub fn layout(title: &str, body: Markup) -> Markup {
                         }
                     }
                 }
-                main { (body) }
+                main id="main-content" { (body) }
                 sa-footer {
                     div slot="brand" {
                         strong style="font-weight: 600; color: var(--sa-text);" {

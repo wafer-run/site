@@ -14,7 +14,7 @@ test.describe('Registry — public', () => {
   test('public_browse_empty', async ({ page }) => {
     const resp = await page.goto('/registry');
     expect(resp?.status()).toBe(200);
-    await expect(page.locator('.empty')).toHaveText(/No packages published yet/);
+    await expect(page.locator('.registry-empty h2')).toHaveText(/No packages published yet/);
   });
 
   test('public_package_detail_404', async ({ page }) => {
