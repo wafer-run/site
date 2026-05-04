@@ -48,15 +48,30 @@ pub fn layout(title: &str, body: Markup) -> Markup {
                         strong style="font-weight: 600; color: var(--sa-text);" {
                             "wafer" span style="color: var(--text-secondary);" { ".run" }
                         }
-                        p style="margin: var(--sa-space-1) 0 0; color: var(--sa-text-muted); font-size: var(--sa-text-sm);" {
+                        p style="margin-top: var(--sa-space-3); color: var(--sa-footer-text-muted); font-size: var(--sa-text-sm); max-width: 24rem;" {
                             "The wafer thin runtime for tools, apps, and services."
                         }
                     }
-                    a slot="links" href="/docs" { "Docs" }
-                    a slot="links" href="/playground" { "Playground" }
-                    a slot="links" href="/registry" { "Registry" }
-                    a slot="links" href="https://github.com/wafer-run/wafer-run"
-                        target="_blank" rel="noopener" { "GitHub" }
+                    div slot="links" class="wafer-footer-grid" {
+                        nav class="wafer-footer-column" aria-label="Product" {
+                            h4 { "Product" }
+                            a href="/" { "Home" }
+                            a href="/playground" { "Playground" }
+                            a href="/registry" { "Registry" }
+                        }
+                        nav class="wafer-footer-column" aria-label="Documentation" {
+                            h4 { "Documentation" }
+                            a href="/docs" { "Docs" }
+                            a href="/docs/quick-start" { "Quick Start" }
+                            a href="/docs/cli" { "CLI" }
+                            a href="/docs/api-reference" { "API Reference" }
+                        }
+                        nav class="wafer-footer-column" aria-label="Community" {
+                            h4 { "Community" }
+                            a href="https://github.com/wafer-run/wafer-run"
+                                target="_blank" rel="noopener noreferrer" { "GitHub" }
+                        }
+                    }
                     span slot="copyright" { "© 2026 wafer.run · MIT licensed" }
                 }
             }

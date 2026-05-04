@@ -221,3 +221,41 @@ pre {
     font-family: var(--sa-font-mono); font-size: 0.95rem;
     text-align: center; word-break: break-all;
 }
+
+/* ─── Footer (categorized columns, ported from solobase-site) ───── */
+.wafer-footer-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--sa-space-12);
+    width: 100%;
+}
+@media (max-width: 720px) {
+    .wafer-footer-grid {
+        flex-direction: column;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        gap: var(--sa-space-8);
+    }
+}
+.wafer-footer-column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sa-space-2);
+}
+.wafer-footer-column h4 {
+    font-size: var(--sa-text-sm);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--sa-footer-text-muted);
+    margin: 0 0 var(--sa-space-2);
+}
+.wafer-footer-column a {
+    color: var(--sa-footer-text);
+    text-decoration: none;
+    font-size: var(--sa-text-sm);
+}
+.wafer-footer-column a:hover {
+    color: var(--sa-accent);
+}
