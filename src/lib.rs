@@ -176,7 +176,7 @@ fn block_settings_for_site() -> BlockSettings {
 /// 2. Read `SOLOBASE_*` infra config via [`InfraConfig::from_env`].
 /// 3. Build the WAFER runtime via [`SolobaseBuilder`] + the shared
 ///    [`register_blocks_for_site`] pre-build hook.
-/// 4-5. Call the shared [`register_post_build_for_site`] hook (registers
+/// 4. Call the shared [`register_post_build_for_site`] hook (registers
 ///    site content, registry, inspector + security-headers overrides,
 ///    `wafer-site-main` flow).
 /// 6. Native-only wiring: HTTP listener + observability + start +
