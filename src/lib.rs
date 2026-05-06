@@ -114,8 +114,7 @@ pub fn register_post_build_for_site(
     );
 
     // 4b. Registry block. See doc comment above re: soft-default behaviour.
-    let jwt_secret = std::env::var(solobase_core::blocks::auth::JWT_SECRET_KEY)
-        .unwrap_or_default();
+    let jwt_secret = std::env::var(solobase_core::blocks::auth::JWT_SECRET_KEY).unwrap_or_default();
     let registry_cfg = crate::blocks::registry::RegistryConfig {
         jwt_secret,
         admin_email: std::env::var("WAFER_RUN__REGISTRY__ADMIN_EMAIL").unwrap_or_default(),
