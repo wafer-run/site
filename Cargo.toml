@@ -4,21 +4,63 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "WAFER website, documentation, playground, and block registry"
+# Resolver v2 disables dev-dep feature unification on lib-only builds, so
+# wasm32 `cargo check --lib --features target-cloudflare` doesn't pull
+# native-only crates (axum, wafer-block-http-listener) into the resolver.
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["target-native"]
+# Native target: includes solobase-native + the LocalStorageService-backed
+# blocks::content. Enables solobase-core's default features (sqlite +
+# storage-local + llm) so the binary keeps the same behaviour as before.
+target-native = [
+    "dep:solobase-native",
+    "dep:tokio",
+    "dep:tracing-subscriber",
+    "dep:reqwest",
+    "dep:wafer-flow-http-server",
+    "dep:wafer-block-local-storage",
+    "solobase-core/sqlite",
+    "solobase-core/storage-local",
+    "solobase-core/llm",
+]
+# Cloudflare target: cdylib for wasm32. Pulls solobase-core with
+# default-features=false so the wasm-incompatible `llm` feature
+# (`tokio` rt-multi-thread + native `reqwest`) stays out of the build.
+target-cloudflare = ["dep:solobase-cloudflare", "dep:worker", "dep:wasm-bindgen"]
 
 [dependencies]
-wafer-run = { path = "../wafer-run/crates/wafer-run" }
+# wafer-run with `default-features = false` so the wasm32-cloudflare build
+# doesn't pull in the `wasm` feature's reqwest + tokio (rt-multi-thread)
+# transitive deps. The `wasmi` feature stays on (lockfile loader). Site's
+# native runtime registers all blocks statically; it doesn't fetch remote
+# WASM blocks at runtime.
+wafer-run = { path = "../wafer-run/crates/wafer-run", default-features = false, features = ["wasmi"] }
 wafer-core = { path = "../wafer-run/crates/wafer-core" }
-wafer-flow-http-server = { path = "../wafer-run/crates/wafer-flow-http-server" }
+# wafer-flow-http-server pulls wafer-run with default features (which
+# includes the `wasm` feature → reqwest + tokio rt-multi-thread). It also
+# wires native HTTP listeners, so it's native-only by design. Gated.
+wafer-flow-http-server = { path = "../wafer-run/crates/wafer-flow-http-server", optional = true }
 wafer-block-inspector = { path = "../wafer-run/crates/wafer-block-inspector" }
 wafer-block-web = { path = "../wafer-run/crates/wafer-block-web" }
-wafer-block-local-storage = { path = "../wafer-run/crates/wafer-block-local-storage" }
+# wafer-block-local-storage uses std::fs — native-only.
+wafer-block-local-storage = { path = "../wafer-run/crates/wafer-block-local-storage", optional = true }
 wafer-block-config = { path = "../wafer-run/crates/wafer-block-config" }
 wafer-block-logger = { path = "../wafer-run/crates/wafer-block-logger" }
 wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
 
-# Solobase platform — site becomes a solobase-native consumer
-solobase-core    = { path = "../solobase/crates/solobase-core" }      # SolobaseBuilder + blocks::auth::register
-solobase-native  = { path = "../solobase/crates/solobase-native" }    # make_sqlite_database_service, etc.
+# Solobase platform — site is a solobase consumer.
+solobase-core       = { path = "../solobase/crates/solobase-core",       default-features = false }
+solobase-native     = { path = "../solobase/crates/solobase-native",     optional = true }
+solobase-cloudflare = { path = "../solobase/crates/solobase-cloudflare", optional = true }
+
+# Cloudflare-only deps (gated behind target-cloudflare).
+worker       = { version = "0.7.5", features = ["d1"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 
 # Registry block support
 maud   = "0.26"
@@ -35,10 +77,10 @@ anyhow = "1"
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full"], optional = true }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls", "multipart"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls", "multipart"], optional = true }
 
 [dev-dependencies]
 wafer-block-sqlite         = { path = "../wafer-run/crates/wafer-block-sqlite" }
