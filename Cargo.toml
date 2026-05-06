@@ -54,17 +54,9 @@ wafer-block-logger = { path = "../wafer-run/crates/wafer-block-logger" }
 wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
 
 # Solobase platform — site is a solobase consumer.
-#
-# NOTE: paths point at the cf-cli worktree for now because PR-A
-# (`feat/solobase-cloudflare-cli-flow`) hasn't merged to solobase main yet.
-# That branch ships:
-#   - solobase-core::blocks::auth::JWT_SECRET_KEY constant
-#   - solobase_cloudflare::run<F, G>(...) worker entry shim
-# both of which this crate consumes. Once PR-A merges, flip these paths
-# back to `../solobase/crates/...`.
-solobase-core    = { path = "../solobase/.worktrees/cf-cli/crates/solobase-core", default-features = false }
-solobase-native  = { path = "../solobase/.worktrees/cf-cli/crates/solobase-native", optional = true }
-solobase-cloudflare = { path = "../solobase/.worktrees/cf-cli/crates/solobase-cloudflare", optional = true }
+solobase-core       = { path = "../solobase/crates/solobase-core",       default-features = false }
+solobase-native     = { path = "../solobase/crates/solobase-native",     optional = true }
+solobase-cloudflare = { path = "../solobase/crates/solobase-cloudflare", optional = true }
 
 # Cloudflare-only deps (gated behind target-cloudflare).
 worker       = { version = "0.7.5", features = ["d1"], optional = true }
