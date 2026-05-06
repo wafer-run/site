@@ -1,0 +1,26 @@
+# wafer-site solobase config.
+#
+# Currently used only by `solobase build/serve/deploy --target cloudflare`.
+# Native runs read all infrastructure config via env vars (SOLOBASE_*).
+
+[cloudflare]
+# CLOUDFLARE_ACCOUNT_ID env can override; one or the other must be set
+# before `solobase deploy --target cloudflare`.
+worker_name        = "wafer-site"
+compatibility_date = "2026-05-01"
+
+[cloudflare.d1]
+binding       = "DB"
+database_name = "wafer-site-prod"
+# Replace with the real id from `wrangler d1 create wafer-site-prod` before
+# the first deploy.
+database_id   = "REPLACE_WITH_REAL_D1_ID"
+
+[cloudflare.r2]
+binding     = "STORAGE"
+bucket_name = "wafer-site-assets"
+
+# Optional — file (relative to repo root) whose TOML contents are
+# deep-merged into the generated wrangler.toml. Use this for
+# routes / custom domains / KV namespaces / additional bindings.
+# wrangler_overrides_path = "wrangler.overrides.toml"
