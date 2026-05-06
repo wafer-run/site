@@ -19,7 +19,13 @@ impl RegistryBlock {
     }
 }
 
-#[async_trait::async_trait]
+// On wasm32 (cloudflare target) the futures returned by service-call
+// helpers (e.g. `wafer_core::clients::database::create`) are `!Send`
+// because the underlying CF Worker D1/R2 bindings wrap `JsFuture`. The
+// upstream `Block` trait is declared `?Send` on wasm32 — match that here
+// so the impl agrees with the trait.
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl Block for RegistryBlock {
     fn info(&self) -> BlockInfo {
         BlockInfo::new(
