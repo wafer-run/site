@@ -1,6 +1,6 @@
 //! Publish endpoint: `POST /registry/api/publish`.
 //!
-//! Flow (admin-gated in Step 2):
+//! Flow (admin-gated):
 //!
 //! 1. `auth::require_admin` — returns 401 if unauthenticated, 403
 //!    "coming-soon" for non-admins.

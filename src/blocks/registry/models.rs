@@ -1,8 +1,7 @@
 //! Data Transfer Objects (DTOs) for JSON responses.
 //!
-//! Populated by Task 8's query helpers in `db.rs` and consumed by the HTTP
-//! route handlers from Task 9 onward. Shapes mirror the registry's public API
-//! contract.
+//! Populated by query helpers in `db.rs` and consumed by the HTTP route
+//! handlers under `routes/`. Shapes mirror the registry's public API contract.
 
 use serde::{Deserialize, Serialize};
 

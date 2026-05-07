@@ -3,8 +3,7 @@
 //! - `GET /registry/api/packages/{org}/{block}`          → `PackageDetail` JSON
 //! - `GET /registry/api/packages/{org}/{block}/{ver}`    → `VersionDetail` JSON
 //!
-//! Populated in Task 9 (public JSON read endpoints). 404 responses use the
-//! `{"error":"not-found","message":"..."}` shape enforced by the plan;
+//! 404 responses use the `{"error":"not-found","message":"..."}` shape;
 //! malformed paths return 400. `OutputStream::error(NotFound, ...)` is not
 //! used here because it serializes the error code as PascalCase
 //! (`"NotFound"`) — the registry's public contract is kebab-case.

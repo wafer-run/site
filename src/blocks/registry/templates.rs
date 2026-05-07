@@ -209,7 +209,7 @@ pub fn cli_login_code(code: &str) -> Markup {
     )
 }
 
-/// Coming soon placeholder (used by Task 11).
+/// "Coming soon" body shown to non-admin users by `auth::require_admin`.
 pub fn coming_soon() -> Markup {
     layout(
         "Coming Soon",
