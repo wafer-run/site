@@ -1,0 +1,21 @@
+# Deep-merged into the wrangler.toml that `solobase build --target cloudflare`
+# generates. Keep deployer-specific extras here so they survive build
+# regeneration (the generated wrangler.toml is overwritten every build).
+
+# Bind the worker to wafer.run as a Custom Domain. CF auto-creates AAAA
+# records on the wafer.run zone and provisions the cert. Routes are array
+# entries — wrangler.rs's deep_merge replaces arrays wholesale, so this
+# fully supplies the routing rather than appending to a default.
+[[routes]]
+pattern        = "wafer.run"
+custom_domain  = true
+zone_name      = "wafer.run"
+
+# www.wafer.run also wants to be a Custom Domain, but the zone has an
+# existing `www` CNAME → wafer.run that blocks the binding. Re-add this
+# route after deleting that CNAME via the CF dashboard:
+#   https://dash.cloudflare.com/.../wafer.run/dns/records → www CNAME → Delete
+# [[routes]]
+# pattern        = "www.wafer.run"
+# custom_domain  = true
+# zone_name      = "wafer.run"

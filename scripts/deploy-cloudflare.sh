@@ -13,31 +13,38 @@
 #      OR a sibling clone of suppers-ai/solobase exists at ../solobase
 #
 # Usage:
-#   ./scripts/deploy-cloudflare.sh           # build + deploy
-#   ./scripts/deploy-cloudflare.sh build     # build only
-#   ./scripts/deploy-cloudflare.sh secret    # set JWT worker secret only
-#   ./scripts/deploy-cloudflare.sh tail      # stream worker logs
+#   ./scripts/deploy-cloudflare.sh                    # build + deploy
+#   ./scripts/deploy-cloudflare.sh build              # build only
+#   ./scripts/deploy-cloudflare.sh secret             # set JWT worker secret
+#   ./scripts/deploy-cloudflare.sh seed-d1-vars       # push runtime config to D1
+#   ./scripts/deploy-cloudflare.sh tail               # stream worker logs
+#
+# Environment selection: ENV_FILE=.env.prod ./scripts/deploy-cloudflare.sh deploy
+#   defaults to .env if unset.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 SITE_ROOT=$(pwd)
 
-# ── Load .env ────────────────────────────────────────────────────────
-if [[ ! -f .env ]]; then
-  echo "error: .env not found. Copy .env.example to .env and fill in CF values." >&2
+ENV_FILE=${ENV_FILE:-.env}
+
+# ── Load env ─────────────────────────────────────────────────────────
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "error: $ENV_FILE not found. Copy .env.example and fill in CF values." >&2
   exit 1
 fi
 set -a
-. ./.env
+. "$ENV_FILE"
 set +a
+echo "using env: $ENV_FILE"
 
 # ── Validate required env ────────────────────────────────────────────
 need=(CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN SOLOBASE_CLOUDFLARE_D1_DATABASE_ID)
 for var in "${need[@]}"; do
   val=${!var:-}
   if [[ -z "$val" || "$val" == "REPLACE_ME" ]]; then
-    echo "error: $var is unset or still 'REPLACE_ME' in .env" >&2
+    echo "error: $var is unset or still 'REPLACE_ME' in $ENV_FILE" >&2
     exit 1
   fi
 done
@@ -62,28 +69,103 @@ echo "using solobase: $SOLOBASE_BIN"
 
 WRANGLER_TOML="$SITE_ROOT/target/solobase-cloudflare/wrangler.toml"
 
+# Variable-name prefixes whose values belong in D1's runtime config table
+# (`suppers_ai__admin__variables`). The worker reads from there at cold
+# start. Solobase deploy creds (CLOUDFLARE_*, SOLOBASE_CLOUDFLARE_*) and
+# native-only infra (SOLOBASE_DB_PATH, SOLOBASE_LISTEN, etc.) are
+# excluded.
+D1_VAR_PREFIXES='^(SOLOBASE_SHARED__|SUPPERS_AI__|WAFER_RUN__)'
+# JWT secret lives as a worker secret (set via `secret` subcommand), not
+# in D1 — the worker reads it from `env.secret(JWT_SECRET_KEY)` directly.
+D1_VAR_BLOCKLIST='^SUPPERS_AI__AUTH__JWT_SECRET$'
+
+# Generate UUIDs for the inserted rows.
+gen_uuid() {
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  else
+    # Fallback: 32 hex chars, dashed.
+    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' \
+      | sed 's/\(........\)\(....\)\(....\)\(....\)\(.*\)/\1-\2-\3-\4-\5/'
+  fi
+}
+
+# SQL-escape a value for single-quoted literals (' → '').
+sql_escape() { printf '%s' "$1" | sed "s/'/''/g"; }
+
 cmd=${1:-deploy}
 case "$cmd" in
   build)
     "$SOLOBASE_BIN" build --target cloudflare
     ;;
+
   deploy)
     "$SOLOBASE_BIN" deploy --target cloudflare
     echo
-    echo "Next: ./scripts/deploy-cloudflare.sh secret   # if JWT not yet set"
+    echo "Next:"
+    echo "  ./scripts/deploy-cloudflare.sh secret         # set JWT worker secret"
+    echo "  ./scripts/deploy-cloudflare.sh seed-d1-vars   # push runtime config to D1"
     ;;
+
   secret)
     if [[ ! -f "$WRANGLER_TOML" ]]; then
       echo "error: wrangler.toml not found — run 'build' first" >&2
       exit 1
     fi
     if [[ -z "${SUPPERS_AI__AUTH__JWT_SECRET:-}" ]]; then
-      echo "error: SUPPERS_AI__AUTH__JWT_SECRET not in .env" >&2
+      echo "error: SUPPERS_AI__AUTH__JWT_SECRET not in $ENV_FILE" >&2
       exit 1
     fi
     printf '%s' "$SUPPERS_AI__AUTH__JWT_SECRET" \
       | wrangler secret put SUPPERS_AI__AUTH__JWT_SECRET --config "$WRANGLER_TOML"
     ;;
+
+  seed-d1-vars)
+    # Push every env var matching $D1_VAR_PREFIXES into the D1 admin
+    # variables table. Idempotent: each key is DELETEd then INSERTed,
+    # so re-running picks up changed values.
+    db_name=${SOLOBASE_CLOUDFLARE_D1_DATABASE_NAME:-wafer-site-prod}
+    sql_file=$(mktemp --suffix=.sql)
+    trap 'rm -f "$sql_file"' EXIT
+
+    # Lazy schema: solobase-cloudflare's D1Service materializes tables
+    # on first insert via `CREATE TABLE IF NOT EXISTS`, but seeding via
+    # raw wrangler bypasses that — emit the DDL here too.
+    cat >"$sql_file" <<'EOF'
+CREATE TABLE IF NOT EXISTS suppers_ai__admin__variables (
+    id TEXT PRIMARY KEY,
+    key TEXT,
+    value TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+EOF
+
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    count=0
+    while IFS= read -r var; do
+      [[ "$var" =~ $D1_VAR_BLOCKLIST ]] && continue
+      val=${!var:-}
+      [[ -z "$val" ]] && continue
+      key_esc=$(sql_escape "$var")
+      val_esc=$(sql_escape "$val")
+      uuid=$(gen_uuid)
+      cat >>"$sql_file" <<EOF
+DELETE FROM suppers_ai__admin__variables WHERE key = '$key_esc';
+INSERT INTO suppers_ai__admin__variables (id, key, value, created_at, updated_at)
+VALUES ('$uuid', '$key_esc', '$val_esc', '$now', '$now');
+EOF
+      count=$((count + 1))
+    done < <(compgen -e | grep -E "$D1_VAR_PREFIXES" | sort)
+
+    if [[ $count -eq 0 ]]; then
+      echo "no D1-bound vars in $ENV_FILE (looking for $D1_VAR_PREFIXES)"
+      exit 0
+    fi
+    echo "seeding $count vars into D1 ($db_name)…"
+    wrangler d1 execute "$db_name" --remote --file "$sql_file"
+    ;;
+
   tail)
     if [[ ! -f "$WRANGLER_TOML" ]]; then
       echo "error: wrangler.toml not found — run 'build' first" >&2
@@ -91,8 +173,9 @@ case "$cmd" in
     fi
     wrangler tail wafer-site --config "$WRANGLER_TOML" --format pretty
     ;;
+
   *)
-    echo "usage: $0 [build|deploy|secret|tail]" >&2
+    echo "usage: $0 [build|deploy|secret|seed-d1-vars|tail]" >&2
     exit 1
     ;;
 esac
