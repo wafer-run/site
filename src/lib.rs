@@ -13,23 +13,23 @@
 //!   `worker-build`. The cloudflare entry (`fetch_main`) routes requests
 //!   through `solobase_cloudflare::run` with this crate's
 //!   [`register_blocks_for_site`] / [`register_post_build_for_site`] hooks.
-//!   v1 ships solobase routes only (admin / auth / registry); the
-//!   site SPA chrome is skipped because [`blocks::content`] is backed by
-//!   `LocalStorageService`, which doesn't compile on wasm32. Refactoring
-//!   the content block to dispatch through the configured `StorageService`
-//!   (R2 on cloudflare) is tracked as a follow-up.
+//!   The post-build hook receives a [`StorageService`] (LocalStorage on
+//!   native, R2 on cloudflare) which [`blocks::content`] uses to serve
+//!   the site SPA chrome, so both targets serve `/` and the docs/registry
+//!   routes uniformly.
 
 pub mod blocks;
 pub mod flows;
 
-use std::collections::HashMap;
-#[cfg(feature = "target-native")]
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[cfg(feature = "target-native")]
 use solobase_core::builder;
 use solobase_core::builder::SolobaseBuilder;
 use solobase_core::features::BlockSettings;
+#[cfg(feature = "target-native")]
+use wafer_block_local_storage::service::LocalStorageService;
+use wafer_core::interfaces::storage::service::StorageService;
 
 #[cfg(feature = "target-native")]
 use solobase_native::{
@@ -58,10 +58,12 @@ pub fn register_blocks_for_site(
 /// Post-build hook: registers site-owned blocks, overrides default block
 /// configs, and registers the `wafer-site-main` flow.
 ///
-/// `target-native` additionally registers [`blocks::content`], which
-/// serves the SPA's `dist/**` from disk via `LocalStorageService`.
-/// `target-cloudflare` skips it because `LocalStorageService` doesn't
-/// compile on wasm32 — v1 cloudflare deploy serves solobase routes only.
+/// `content_storage` is the [`StorageService`] the site content block
+/// reads its assets from. Native passes a [`LocalStorageService`] rooted
+/// at `<repo>/dist` (folder=""); cloudflare passes the R2-backed service
+/// from `solobase-cloudflare` (folder="dist", since `solobase deploy
+/// --target cloudflare` uploads `dist/**` under that prefix in R2). Both
+/// targets serve the SPA chrome from `/` uniformly.
 ///
 /// ## Registry env vars
 ///
@@ -75,17 +77,18 @@ pub fn register_blocks_for_site(
 /// mode for any other missing solobase config.
 pub fn register_post_build_for_site(
     wafer: &mut wafer_run::Wafer,
+    content_storage: Arc<dyn StorageService>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // 4a. Native-only: site content block (LocalStorageService isn't
-    //     wasm-compatible). Cloudflare deploy v1 serves solobase routes
-    //     only — the site SPA chrome will land once the content block is
-    //     refactored to use the configured StorageService (R2 on CF).
+    // 4a. Site content block. Native's LocalStorage is rooted at
+    //     <repo>/dist (folder=""); cloudflare's R2 service holds the
+    //     whole bucket (folder="dist" since deploy uploads dist/**
+    //     under that prefix).
     #[cfg(feature = "target-native")]
-    {
-        let dist_root = format!("{}/dist", env!("CARGO_MANIFEST_DIR"));
-        crate::blocks::content::register(wafer, &dist_root)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
-    }
+    let content_folder = "";
+    #[cfg(feature = "target-cloudflare")]
+    let content_folder = "dist";
+    crate::blocks::content::register(wafer, content_storage, content_folder)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
     // `SolobaseBuilder` configures `wafer-run/inspector` with
     // `allow_anonymous: false` because solobase runs behind auth. The site
@@ -231,8 +234,18 @@ pub async fn run() -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("failed to build solobase runtime: {e}"))?;
 
-    // 4-5. Shared post-build hooks.
-    register_post_build_for_site(&mut wafer)
+    // 4-5. Shared post-build hooks. The content block reads from a
+    //     LocalStorage rooted at <repo>/dist; this is separate from
+    //     solobase's main storage (rooted at infra.storage_root) so the
+    //     two key namespaces don't collide.
+    let content_storage: Arc<dyn StorageService> = {
+        let dist_root = format!("{}/dist", env!("CARGO_MANIFEST_DIR"));
+        Arc::new(
+            LocalStorageService::new(&dist_root)
+                .map_err(|e| anyhow::anyhow!("LocalStorageService::new({dist_root}): {e:?}"))?,
+        )
+    };
+    register_post_build_for_site(&mut wafer, content_storage)
         .map_err(|e| anyhow::anyhow!("register_post_build_for_site: {e}"))?;
 
     // 6. Native-only wiring: HTTP listener + observability + start.
