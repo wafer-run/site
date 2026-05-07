@@ -1,7 +1,4 @@
 //! Browse endpoints: registry index, search, and package detail pages.
-//!
-//! Task 9 lands `search()` — the JSON API that powers the browse page.
-//! Task 10 implements `index()` and `package_detail()` with maud HTML templates.
 
 use wafer_run::{Context, Message, OutputStream};
 
@@ -25,8 +22,8 @@ pub async fn index(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> O
 /// - `q` — optional substring filter over package `name` (case-sensitive LIKE).
 /// - `page` — 1-based, defaults to 1.
 ///
-/// Page size is currently fixed at 20 rows; Task 10 may surface it as a
-/// param once pagination controls appear in the HTML.
+/// Page size is currently fixed at 20 rows; can be surfaced as a param
+/// once pagination controls appear in the HTML.
 pub async fn search(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> OutputStream {
     let q_raw = msg.query("q");
     let q: Option<&str> = if q_raw.is_empty() { None } else { Some(q_raw) };

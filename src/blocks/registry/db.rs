@@ -1,8 +1,8 @@
 //! Typed helpers for the registry block's collections.
 //!
 //! No raw SQL — all access goes through `wafer_core::clients::database`.
-//! Task 7 ships constants + the reserved-orgs seed. Tasks 8, 12, 13, 14
-//! extend this module with query helpers as routes come online.
+//! Owns the table-name constants, reserved-orgs seed, and every query helper
+//! used by the route handlers under `routes/`.
 
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -396,9 +396,9 @@ pub async fn get_version(
 
 // ---- CLI login + token helpers --------------------------------------------
 //
-// Task 12: the CLI-login flow issues a short-lived "device code" on the
-// admin-gated `/registry/cli-login` page. The CLI exchanges that code for a
-// long-lived personal access token (PAT). Both the code and the PAT live in
+// The CLI-login flow issues a short-lived "device code" on the admin-gated
+// `/registry/cli-login` page. The CLI exchanges that code for a long-lived
+// personal access token (PAT). Both the code and the PAT live in
 // collections managed by this block (`CODES` and `TOKENS`) — no raw SQL,
 // everything goes through the typed `db::*` API.
 
@@ -546,9 +546,8 @@ pub async fn exchange_cli_code(ctx: &dyn Context, code: &str) -> Result<Option<(
 /// caller can fall through to the next auth strategy without branching on
 /// error kinds.
 ///
-/// Replaces the inline sha256+lookup that `auth::require_user` used before
-/// Task 12. Centralizing here means any future token shape change (rotation,
-/// last-used bookkeeping) lands in one place.
+/// Centralized so any future token shape change (rotation, last-used
+/// bookkeeping) lands in one place rather than across `auth::require_user`.
 pub async fn resolve_bearer(
     ctx: &dyn Context,
     token_plain: &str,
@@ -593,8 +592,8 @@ pub async fn resolve_bearer(
 
 // ---- Publish helpers ------------------------------------------------------
 //
-// Task 13: writes that land a new `{org}/{name}@{version}` row. Every helper
-// goes through the typed `wafer_core::clients::database` API — no raw SQL.
+// Writes that land a new `{org}/{name}@{version}` row. Every helper goes
+// through the typed `wafer_core::clients::database` API — no raw SQL.
 //
 // Schema-drift note: the in-memory harness auto-creates tables from the
 // first-inserted row's keys. So every nullable `VERSIONS` column
@@ -682,8 +681,7 @@ pub async fn is_reserved(ctx: &dyn Context, org_name: &str) -> Result<bool> {
 /// Every nullable `VERSIONS` column is written (as `Null` when the manifest
 /// didn't supply a value) to avoid the in-memory harness's schema-drift
 /// trap: auto-created tables pick their columns from the first insert, and
-/// subsequent `update` calls (like Task 14's yank) need those columns to
-/// exist.
+/// subsequent `update` calls (e.g. yank) need those columns to exist.
 pub async fn insert_version(
     ctx: &dyn Context,
     org_id: &str,
@@ -791,7 +789,7 @@ fn toml_to_json(v: &toml::Value) -> serde_json::Value {
 
 // ---- Yank helpers ---------------------------------------------------------
 //
-// Task 14: flip the `yanked` flag on a version row. Resolves
+// Flip the `yanked` flag on a version row. Resolves
 // org → package → version client-side, then updates the version row via the
 // typed `db::update` API.
 //

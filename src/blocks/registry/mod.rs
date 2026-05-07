@@ -1,7 +1,4 @@
 //! `wafer-run/registry` block — package registry for WAFER blocks.
-//!
-//! Task 6 scaffolds the block structure with route dispatch and stub handlers.
-//! Real handler implementations land in Tasks 7–14.
 
 pub mod auth;
 pub mod db;
@@ -24,8 +21,7 @@ pub const NAME: &str = "wafer-run/registry";
 /// than pulled from `ConfigService` so the call site stays easy to audit.
 #[derive(Clone, Debug)]
 pub struct RegistryConfig {
-    /// Email of the user allowed to publish during Step 2. Enforced once
-    /// Task 13 implements the publish endpoint.
+    /// Email of the user allowed to publish. Enforced by `auth::require_admin`.
     pub admin_email: String,
 
     /// Top-level storage key prefix for registry tarballs. Defaults to

@@ -6,12 +6,12 @@
 //!
 //! Semantics per spec §8: yanking hides a version from "latest" resolution
 //! (and from ABI-compatible search) but keeps it downloadable by explicit
-//! version — the Task 14 download handler doesn't consult the flag.
-//! Unyanking restores it to `latest` resolution.
+//! version — the download handler doesn't consult the flag. Unyanking
+//! restores it to `latest` resolution.
 //!
 //! Idempotency: writing `yanked = true` over an already-yanked row succeeds,
-//! because `db::update` doesn't compare the old value. That matches the plan
-//! ("returns 200 without state change"). No explicit get-first needed.
+//! because `db::update` doesn't compare the old value — the endpoint
+//! returns 200 without state change. No explicit get-first needed.
 
 use serde_json::json;
 use wafer_run::{Context, InputStream, Message, OutputStream};

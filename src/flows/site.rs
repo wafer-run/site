@@ -33,8 +33,8 @@ pub fn routes() -> serde_json::Value {
         { "path": "/_inspector/**", "block": "wafer-run/inspector" },
         { "path": "/_inspector",    "block": "wafer-run/inspector" },
 
-        // Package registry. `wafer-run/registry` is a stub today; Task 6+
-        // fleshes it out.
+        // Package registry — `wafer-run/registry` (publish, yank, download,
+        // browse, CLI login). Registered by `crate::blocks::registry`.
         { "path": "/registry/**", "block": "wafer-run/registry" },
         { "path": "/registry",    "block": "wafer-run/registry" },
 

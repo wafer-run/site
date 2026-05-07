@@ -1,11 +1,10 @@
 //! CLI login endpoints: GET /registry/cli-login and POST /registry/api/cli-login/exchange
 //!
-//! Task 12 wires the device-code flow used by the `wafer` CLI to acquire a
-//! personal access token:
+//! Device-code flow used by the `wafer` CLI to acquire a personal access token:
 //!
 //! 1. Admin opens `/registry/cli-login` in a browser. The page is gated by
-//!    [`auth::require_admin`] — non-admins see the Task-11 coming-soon
-//!    page. On success, [`db::issue_cli_code`] mints a 64-char hex code and
+//!    [`auth::require_admin`] — non-admins see the coming-soon page.
+//!    On success, [`db::issue_cli_code`] mints a 64-char hex code and
 //!    [`templates::cli_login_code`] renders it for copy-paste.
 //!
 //! 2. The CLI prompts the user for the code, then POSTs it to

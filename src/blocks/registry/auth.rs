@@ -43,7 +43,7 @@ pub struct AuthedUser {
 ///    `registry_tokens` by `sha256(raw_token)` hex. Revoked tokens (those
 ///    with a `revoked_at` set) are skipped and we fall through to step 2.
 ///    This path exists because PATs are minted by
-///    `POST /registry/api/cli-login/exchange` (Task 12) and live only in the
+///    `POST /registry/api/cli-login/exchange` and live only in the
 ///    registry's own store — `suppers-ai/auth` doesn't know about them.
 /// 2. Delegate to `suppers-ai/auth` via `AUTH_REQUIRE_USER`. The session
 ///    cookie (and Authorization header, for solobase-managed PATs) ride on
@@ -58,10 +58,10 @@ pub async fn require_user(
     cfg: &RegistryConfig,
 ) -> Result<AuthedUser, OutputStream> {
     // 1. Try bearer PAT against registry_tokens. This path handles PATs the
-    //    registry itself issued via CLI-login exchange (Task 12). The PAT
-    //    inherits the auth method of the session that minted it — for now
-    //    we tag it `"pat"` so a future tightening can require, say,
-    //    "PATs only issued from OAuth sessions" without re-plumbing.
+    //    registry itself issued via CLI-login exchange. The PAT inherits the
+    //    auth method of the session that minted it — for now we tag it
+    //    `"pat"` so a future tightening can require, say, "PATs only issued
+    //    from OAuth sessions" without re-plumbing.
     let auth_header = msg.header("authorization");
     if let Some(token) = auth_header.strip_prefix("Bearer ") {
         if let Ok(Some((user_id, email))) = db::resolve_bearer(ctx, token).await {

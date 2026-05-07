@@ -32,7 +32,7 @@ impl Block for RegistryBlock {
             NAME,
             "0.1.0",
             "http-handler@v1",
-            "WAFER package registry (dispatch scaffold)",
+            "WAFER package registry",
         )
         .instance_mode(InstanceMode::Singleton)
         .category(BlockCategory::Infrastructure)
