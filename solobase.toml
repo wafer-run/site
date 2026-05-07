@@ -12,6 +12,11 @@
 # for staging/prod variants on the same account.
 worker_name        = "wafer-site"
 compatibility_date = "2026-05-01"
+# File (relative to repo root) whose TOML contents are deep-merged into
+# the generated wrangler.toml. Holds `[[routes]]` for the wafer.run
+# custom-domain bindings. Must live at the [cloudflare] level (NOT
+# under [cloudflare.r2] — toml section scoping is positional).
+wrangler_overrides_path = "wrangler.overrides.toml"
 
 [cloudflare.d1]
 # Binding is a code contract — the worker reads `env.DB`.
@@ -28,8 +33,3 @@ binding     = "STORAGE"
 # Default R2 bucket for the canonical wafer-site deploy.
 # Override with SOLOBASE_CLOUDFLARE_R2_BUCKET_NAME.
 bucket_name = "wafer-site-assets"
-
-# Optional — file (relative to repo root) whose TOML contents are
-# deep-merged into the generated wrangler.toml. Use this for
-# routes / custom domains / KV namespaces / additional bindings.
-# wrangler_overrides_path = "wrangler.overrides.toml"
