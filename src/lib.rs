@@ -99,13 +99,15 @@ pub fn register_post_build_for_site(
     );
 
     // CSP override: chrome (`<sa-header>` / `<sa-footer>`) loads from
-    // `https://site-kit.suppers.ai/dist/...`. Default CSP only allows
+    // `https://site-kit.suppers.ai/dist/...`; Cloudflare Web Analytics
+    // injects `https://static.cloudflareinsights.com/beacon.min.js`
+    // after the response leaves the worker. Default CSP only allows
     // `'self'`; extend script-src and style-src accordingly.
     wafer.add_block_config(
         "wafer-run/security-headers",
         serde_json::json!({
             "csp": "default-src 'self'; \
-                    script-src 'self' 'unsafe-inline' https://site-kit.suppers.ai; \
+                    script-src 'self' 'unsafe-inline' https://site-kit.suppers.ai https://static.cloudflareinsights.com; \
                     style-src 'self' 'unsafe-inline' https://site-kit.suppers.ai; \
                     img-src 'self' data: blob: https:; \
                     font-src 'self' https:; \
