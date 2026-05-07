@@ -11,11 +11,7 @@ pattern        = "wafer.run"
 custom_domain  = true
 zone_name      = "wafer.run"
 
-# www.wafer.run also wants to be a Custom Domain, but the zone has an
-# existing `www` CNAME → wafer.run that blocks the binding. Re-add this
-# route after deleting that CNAME via the CF dashboard:
-#   https://dash.cloudflare.com/.../wafer.run/dns/records → www CNAME → Delete
-# [[routes]]
-# pattern        = "www.wafer.run"
-# custom_domain  = true
-# zone_name      = "wafer.run"
+[[routes]]
+pattern        = "www.wafer.run"
+custom_domain  = true
+zone_name      = "wafer.run"
