@@ -2,22 +2,31 @@
 #
 # Currently used only by `solobase build/serve/deploy --target cloudflare`.
 # Native runs read all infrastructure config via env vars (SOLOBASE_*).
+#
+# Deployer-specific identifiers — D1 database_id, the CLOUDFLARE_*
+# credentials, and any per-deployment overrides — come from env.
+# See `.env.example` for the full list.
 
 [cloudflare]
-# CLOUDFLARE_ACCOUNT_ID env can override; one or the other must be set
-# before `solobase deploy --target cloudflare`.
+# Cloudflare-side worker name. Override with SOLOBASE_CLOUDFLARE_WORKER_NAME
+# for staging/prod variants on the same account.
 worker_name        = "wafer-site"
 compatibility_date = "2026-05-01"
 
 [cloudflare.d1]
+# Binding is a code contract — the worker reads `env.DB`.
 binding       = "DB"
+# Default D1 name for the canonical wafer-site deploy.
+# Override with SOLOBASE_CLOUDFLARE_D1_DATABASE_NAME.
 database_name = "wafer-site-prod"
-# Replace with the real id from `wrangler d1 create wafer-site-prod` before
-# the first deploy.
-database_id   = "REPLACE_WITH_REAL_D1_ID"
+# database_id MUST come from env (SOLOBASE_CLOUDFLARE_D1_DATABASE_ID).
+# Get one with `wrangler d1 create <name>`.
 
 [cloudflare.r2]
+# Binding is a code contract — the worker reads `env.STORAGE`.
 binding     = "STORAGE"
+# Default R2 bucket for the canonical wafer-site deploy.
+# Override with SOLOBASE_CLOUDFLARE_R2_BUCKET_NAME.
 bucket_name = "wafer-site-assets"
 
 # Optional — file (relative to repo root) whose TOML contents are
