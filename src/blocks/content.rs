@@ -1,26 +1,23 @@
 //! `wafer-site/content` — serves the site's static content (docs, landing
-//! page, playground HTML) directly from disk.
+//! page, playground HTML) from a [`StorageService`] passed in at register
+//! time. Native consumers wire a [`LocalStorageService`] rooted at
+//! `<repo>/dist/` (folder = `""`); cloudflare consumers wire the R2-backed
+//! `StorageService` from `solobase-cloudflare` (folder = `"dist"` since
+//! `solobase deploy --target cloudflare` uploads `dist/**` under that
+//! prefix in the R2 bucket).
 //!
 //! ## Why not `wafer-run/web`?
 //!
 //! `wafer-run/web` dispatches reads through the `wafer-run/storage` alias,
-//! which `SolobaseBuilder` replaces with `SolobaseStorageBlock`. That wrapper
-//! namespaces every folder under the calling block's name
-//! (`wafer-run/web/<folder>/<key>`), so the pre-solobase layout of
-//! `$CARGO_MANIFEST_DIR/dist/...` stops resolving unless we either copy
-//! every file into the namespaced prefix or route requests through a
-//! non-namespaced block.
-//!
-//! Rather than duplicate storage or cross-block shenanigans, this block
-//! opens its own [`LocalStorageService`] rooted at the site's `dist/`
-//! directory and serves from there. Reads never hit `wafer-run/storage`,
-//! so namespacing doesn't apply. The block is scoped to the site binary
-//! (no `wafer-run/*` or `suppers-ai/*` name) because it's strictly a
-//! local SPA-content helper.
+//! which `SolobaseBuilder` replaces with `SolobaseStorageBlock`. That
+//! wrapper namespaces every folder under the calling block's name
+//! (`wafer-site/content/<folder>/<key>`), so the deploy's R2 keys
+//! (`dist/<key>`) wouldn't resolve. This block holds a direct
+//! `Arc<dyn StorageService>` instead — reads bypass the namespacing
+//! wrapper.
 
 use std::{path::Path, sync::Arc};
 
-use wafer_block_local_storage::service::LocalStorageService;
 use wafer_core::interfaces::storage::service::StorageService;
 use wafer_run::{
     Block, BlockCategory, BlockInfo, Context, ErrorCode, InputStream, InstanceMode, LifecycleEvent,
@@ -31,25 +28,22 @@ use wafer_run::{
 /// `{org}/{name}` convention doesn't collide with anything published.
 pub const NAME: &str = "wafer-site/content";
 
-/// Block serving `$dist_root/**` as static files.
+/// Block serving `<service-root>/<folder>/**` as static files.
 pub struct ContentBlock {
-    service: Arc<LocalStorageService>,
-    /// Folder name passed to the storage service. `LocalStorageService`
-    /// joins this under its root, so setting it to `""` reads directly
-    /// from `dist_root`.
+    service: Arc<dyn StorageService>,
+    /// Folder argument passed to the storage service `get()`. Combined
+    /// with the service's root, this addresses where the SPA assets live.
     folder: String,
     index_file: String,
 }
 
 impl ContentBlock {
-    pub fn new(dist_root: &str) -> anyhow::Result<Self> {
-        let service = LocalStorageService::new(dist_root)
-            .map_err(|e| anyhow::anyhow!("LocalStorageService::new({dist_root}): {e:?}"))?;
-        Ok(Self {
-            service: Arc::new(service),
-            folder: String::new(),
+    pub fn new(service: Arc<dyn StorageService>, folder: impl Into<String>) -> Self {
+        Self {
+            service,
+            folder: folder.into(),
             index_file: "index.html".to_string(),
-        })
+        }
     }
 
     async fn serve(&self, msg: &Message) -> OutputStream {
@@ -93,14 +87,15 @@ impl ContentBlock {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl Block for ContentBlock {
     fn info(&self) -> BlockInfo {
         BlockInfo::new(
             NAME,
             "0.0.1",
             "http-handler@v1",
-            "Site static content server (reads $CARGO_MANIFEST_DIR/dist directly)",
+            "Site static content server (reads from a configured StorageService)",
         )
         .instance_mode(InstanceMode::Singleton)
         .category(BlockCategory::Infrastructure)
@@ -127,8 +122,12 @@ impl Block for ContentBlock {
     }
 }
 
-pub fn register(w: &mut Wafer, dist_root: &str) -> anyhow::Result<()> {
-    let block = ContentBlock::new(dist_root)?;
+pub fn register(
+    w: &mut Wafer,
+    service: Arc<dyn StorageService>,
+    folder: impl Into<String>,
+) -> anyhow::Result<()> {
+    let block = ContentBlock::new(service, folder);
     w.register_block(NAME, Arc::new(block))
         .map_err(|e: RuntimeError| anyhow::anyhow!("register {NAME}: {e}"))
 }
