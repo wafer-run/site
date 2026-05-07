@@ -28,62 +28,57 @@ impl RegistryBlock {
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl Block for RegistryBlock {
     fn info(&self) -> BlockInfo {
-        BlockInfo::new(
-            NAME,
-            "0.1.0",
-            "http-handler@v1",
-            "WAFER package registry",
-        )
-        .instance_mode(InstanceMode::Singleton)
-        .category(BlockCategory::Infrastructure)
-        .requires(vec![
-            "wafer-run/database".into(),
-            "wafer-run/storage".into(),
-            "suppers-ai/auth".into(),
-        ])
-        .collections(vec![
-            CollectionSchema::new(db::ORGS)
-                .field_unique("name", "string")
-                .field_optional("owner_user_id", "string")
-                .field_optional("verified_via", "string")
-                .field_optional("verified_ref", "string")
-                .field_default("is_reserved", "bool", "false"),
-            CollectionSchema::new(db::PACKAGES)
-                .field_ref("org_id", "string", &format!("{}.id", db::ORGS))
-                .field("name", "string")
-                .field_optional("summary", "string")
-                .field("created_by", "string")
-                .unique_index(&["org_id", "name"]),
-            CollectionSchema::new(db::VERSIONS)
-                .field_ref("package_id", "string", &format!("{}.id", db::PACKAGES))
-                .field("version", "string")
-                .field("abi", "int")
-                .field("sha256", "string")
-                .field("storage_key", "string")
-                .field("size_bytes", "int")
-                .field_optional("license", "string")
-                .field_optional("readme_md", "string")
-                .field_default("dependencies", "string", "[]")
-                .field_default("capabilities", "string", "{}")
-                .field_default("yanked", "bool", "false")
-                .field_optional("yanked_reason", "string")
-                .field_optional("yanked_at", "datetime")
-                .field("published_by", "string")
-                .field("published_at", "datetime")
-                .unique_index(&["package_id", "version"])
-                .index(&["package_id", "yanked"]),
-            CollectionSchema::new(db::CODES)
-                .field_unique("code", "string")
-                .field("user_id", "string")
-                .field("expires_at", "datetime")
-                .field_optional("used_at", "datetime"),
-            CollectionSchema::new(db::TOKENS)
-                .field("user_id", "string")
-                .field_default("name", "string", "wafer-cli")
-                .field_unique("hash", "string")
-                .field_optional("last_used_at", "datetime")
-                .field_optional("revoked_at", "datetime"),
-        ])
+        BlockInfo::new(NAME, "0.1.0", "http-handler@v1", "WAFER package registry")
+            .instance_mode(InstanceMode::Singleton)
+            .category(BlockCategory::Infrastructure)
+            .requires(vec![
+                "wafer-run/database".into(),
+                "wafer-run/storage".into(),
+                "suppers-ai/auth".into(),
+            ])
+            .collections(vec![
+                CollectionSchema::new(db::ORGS)
+                    .field_unique("name", "string")
+                    .field_optional("owner_user_id", "string")
+                    .field_optional("verified_via", "string")
+                    .field_optional("verified_ref", "string")
+                    .field_default("is_reserved", "bool", "false"),
+                CollectionSchema::new(db::PACKAGES)
+                    .field_ref("org_id", "string", &format!("{}.id", db::ORGS))
+                    .field("name", "string")
+                    .field_optional("summary", "string")
+                    .field("created_by", "string")
+                    .unique_index(&["org_id", "name"]),
+                CollectionSchema::new(db::VERSIONS)
+                    .field_ref("package_id", "string", &format!("{}.id", db::PACKAGES))
+                    .field("version", "string")
+                    .field("abi", "int")
+                    .field("sha256", "string")
+                    .field("storage_key", "string")
+                    .field("size_bytes", "int")
+                    .field_optional("license", "string")
+                    .field_optional("readme_md", "string")
+                    .field_default("dependencies", "string", "[]")
+                    .field_default("capabilities", "string", "{}")
+                    .field_default("yanked", "bool", "false")
+                    .field_optional("yanked_reason", "string")
+                    .field_optional("yanked_at", "datetime")
+                    .field("published_by", "string")
+                    .field("published_at", "datetime")
+                    .unique_index(&["package_id", "version"])
+                    .index(&["package_id", "yanked"]),
+                CollectionSchema::new(db::CODES)
+                    .field_unique("code", "string")
+                    .field("user_id", "string")
+                    .field("expires_at", "datetime")
+                    .field_optional("used_at", "datetime"),
+                CollectionSchema::new(db::TOKENS)
+                    .field("user_id", "string")
+                    .field_default("name", "string", "wafer-cli")
+                    .field_unique("hash", "string")
+                    .field_optional("last_used_at", "datetime")
+                    .field_optional("revoked_at", "datetime"),
+            ])
     }
 
     async fn handle(&self, ctx: &dyn Context, msg: Message, input: InputStream) -> OutputStream {
