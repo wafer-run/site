@@ -59,6 +59,7 @@ use wafer_site::blocks::registry::{self, handlers::RegistryBlock, RegistryConfig
 /// - `suppers-ai/auth` — a minimal stub that resolves seeded
 ///   `(user_id -> email)` mappings for `auth.user_profile`. Empty when
 ///   unseeded, in which case `require_admin` treats the user as non-admin.
+#[derive(Clone)]
 pub struct InMemoryCtx {
     db_block: Arc<dyn Block>,
     storage_block: Arc<dyn Block>,
@@ -67,10 +68,13 @@ pub struct InMemoryCtx {
     /// map. `auth.require_user` always fails in the stub — PAT-based auth
     /// (via `db::resolve_bearer`) runs *before* the fallback, so only
     /// `auth.user_profile` is exercised in practice.
-    identities: HashMap<String, String>,
+    identities: Arc<HashMap<String, String>>,
     /// Holder for the tempdir backing LocalStorageService. Dropped when
-    /// the context is, which tears the filesystem down too.
-    _storage_tmp: tempfile::TempDir,
+    /// the last clone of the context is, which tears the filesystem down
+    /// too. `Arc` so `clone_arc` can hand out additional owning handles
+    /// (`AuthServiceImpl::init` stashes one) without prematurely tearing
+    /// down storage when the original context borrow ends.
+    _storage_tmp: Arc<tempfile::TempDir>,
 }
 
 impl InMemoryCtx {
@@ -107,8 +111,8 @@ impl InMemoryCtx {
         Self {
             db_block,
             storage_block,
-            identities,
-            _storage_tmp: tmp,
+            identities: Arc::new(identities),
+            _storage_tmp: Arc::new(tmp),
         }
     }
 }
@@ -133,6 +137,11 @@ impl Context for InMemoryCtx {
 
     fn config_get(&self, _key: &str) -> Option<&str> {
         None
+    }
+
+    fn clone_arc(&self) -> Arc<dyn Context> {
+        // Cheap: every interior field is `Arc`-shared.
+        Arc::new(self.clone())
     }
 }
 
