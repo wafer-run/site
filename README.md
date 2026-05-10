@@ -21,7 +21,7 @@ cargo run                  # listens on http://localhost:8090
 `.env.example` documents every variable the binary reads. The defaults work for a local dev run; you only have to fill in:
 
 - `SUPPERS_AI__AUTH__JWT_SECRET` — any random string
-- `SUPPERS_AI__AUTH__ADMIN_EMAIL` and `WAFER_RUN__REGISTRY__ADMIN_EMAIL` — your email
+- `SOLOBASE_SHARED__AUTH__BOOTSTRAP_ADMIN_EMAIL` and `WAFER_RUN__REGISTRY__ADMIN_EMAIL` — your email
 - The `*GITHUB*` triple if you want OAuth login
 
 ## Tests
