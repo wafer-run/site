@@ -78,15 +78,16 @@ async fn bearer_pat_resolves_against_registry_tokens() {
 
     let mut data: HashMap<String, serde_json::Value> = HashMap::new();
     data.insert("user_id".into(), serde_json::json!("u1"));
+    data.insert("email".into(), serde_json::json!("u1@example.com"));
     data.insert("name".into(), serde_json::json!("test"));
     data.insert("hash".into(), serde_json::json!(hash));
     db::create(ctx.as_ref(), registry::db::TOKENS, data)
         .await
         .expect("insert token");
 
-    // Dispatch through `require_user` with the bearer token. `fetch_email`
-    // will fail (no `suppers-ai/auth` registered in this ctx) and return
-    // `""`, so we assert on id only.
+    // Dispatch through `require_user` with the bearer token. The email
+    // stored on the token row at exchange time is now the authoritative
+    // source — resolve_bearer returns it directly.
     let mut msg = Message::new("retrieve");
     msg.set_meta("http.header.authorization", format!("Bearer {raw}"));
 
@@ -95,10 +96,7 @@ async fn bearer_pat_resolves_against_registry_tokens() {
         panic!("bearer PAT resolves to AuthedUser");
     };
     assert_eq!(user.id, "u1");
-    assert_eq!(
-        user.email, "",
-        "fetch_email returns empty when suppers-ai/auth is not registered"
-    );
+    assert_eq!(user.email, "u1@example.com");
 }
 
 #[tokio::test]
@@ -110,6 +108,7 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
     let hash = hex::encode(Sha256::digest(raw.as_bytes()));
     let mut data: HashMap<String, serde_json::Value> = HashMap::new();
     data.insert("user_id".into(), serde_json::json!("u1"));
+    data.insert("email".into(), serde_json::json!("u1@example.com"));
     data.insert("name".into(), serde_json::json!("test"));
     data.insert("hash".into(), serde_json::json!(hash));
     db::create(ctx.as_ref(), registry::db::TOKENS, data)
