@@ -140,6 +140,12 @@ impl Block for RegistryBlock {
         event: LifecycleEvent,
     ) -> std::result::Result<(), WaferError> {
         if matches!(event.event_type, LifecycleType::Init) {
+            super::migrations::apply(ctx).await.map_err(|e| {
+                WaferError::new(
+                    wafer_run::ErrorCode::Internal,
+                    format!("registry migrations: {e}"),
+                )
+            })?;
             db::seed_reserved_orgs(ctx).await.map_err(|e| {
                 WaferError::new(
                     wafer_run::ErrorCode::Internal,
