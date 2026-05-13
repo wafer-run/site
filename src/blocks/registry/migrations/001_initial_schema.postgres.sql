@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS wafer_run__registry__cli_login_codes (
     id          TEXT PRIMARY KEY,
     code        TEXT NOT NULL,
     user_id     TEXT NOT NULL,
+    email       TEXT NOT NULL,
     expires_at  TEXT NOT NULL,
     used_at     TEXT,
     created_at  TEXT NOT NULL,
@@ -69,6 +70,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_code
 CREATE TABLE IF NOT EXISTS wafer_run__registry__tokens (
     id              TEXT PRIMARY KEY,
     user_id         TEXT NOT NULL,
+    email           TEXT NOT NULL,
     name            TEXT NOT NULL DEFAULT 'wafer-cli',
     hash            TEXT NOT NULL,
     last_used_at    TEXT,

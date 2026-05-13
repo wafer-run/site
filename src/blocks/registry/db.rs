@@ -189,6 +189,7 @@ pub async fn latest_version_for(ctx: &dyn Context, package_id: &str) -> Result<O
         // we only need to walk to the first non-yanked row.
         limit: 100,
         offset: 0,
+        skip_count: false,
     };
     let res = db::list(ctx, VERSIONS, &opts)
         .await
@@ -231,6 +232,7 @@ pub async fn list_packages(
         }],
         limit: per_page,
         offset,
+        skip_count: false,
     };
     let pkgs = db::list(ctx, PACKAGES, &opts)
         .await
