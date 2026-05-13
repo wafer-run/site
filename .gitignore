@@ -22,3 +22,6 @@ playwright-report/
 .vscode/
 .idea/
 .DS_Store
+
+# Cloudflare Wrangler local state
+.wrangler/
