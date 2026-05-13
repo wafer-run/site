@@ -159,6 +159,7 @@ async fn resolve_bearer_skips_revoked_tokens() {
     let hash = hex::encode(Sha256::digest(raw.as_bytes()));
     let mut data: HashMap<String, serde_json::Value> = HashMap::new();
     data.insert("user_id".into(), serde_json::json!("u1"));
+    data.insert("email".into(), serde_json::json!("u1@example.com"));
     data.insert("name".into(), serde_json::json!("test"));
     data.insert("hash".into(), serde_json::json!(hash));
     data.insert(

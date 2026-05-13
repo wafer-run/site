@@ -26,6 +26,7 @@ async fn create_pkg(
     data.insert("org_id".into(), json!(org_id));
     data.insert("name".into(), json!(name));
     data.insert("summary".into(), json!(summary));
+    data.insert("created_by".into(), json!("test-user"));
     data.insert("created_at".into(), json!(created_at));
     db::create(ctx, registry::db::PACKAGES, data)
         .await
@@ -51,6 +52,7 @@ async fn create_version(
     );
     data.insert("size_bytes".into(), json!(1024));
     data.insert("yanked".into(), json!(false));
+    data.insert("published_by".into(), json!("test-user"));
     data.insert("published_at".into(), json!(published_at));
     db::create(ctx, registry::db::VERSIONS, data)
         .await
