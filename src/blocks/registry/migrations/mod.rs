@@ -134,35 +134,31 @@ mod tests {
     #[test]
     fn split_handles_multiple_statements() {
         let sql = "DROP TABLE foo;\nCREATE TABLE bar (id TEXT);\n";
-        let parts: Vec<_> = split_statements(sql)
+        let count = split_statements(sql)
             .into_iter()
             .filter(|s| has_executable_content(s))
-            .collect();
-        assert_eq!(parts.len(), 2);
+            .count();
+        assert_eq!(count, 2);
     }
 
     #[test]
     fn sql_files_split_into_expected_chunks() {
-        let sqlite_parts: Vec<_> = split_statements(super::SQL_001_SQLITE)
+        let sqlite_count = split_statements(super::SQL_001_SQLITE)
             .into_iter()
             .filter(|s| has_executable_content(s))
-            .collect();
+            .count();
         assert_eq!(
-            sqlite_parts.len(),
-            12,
-            "sqlite migration: expected 12 statements, got {}",
-            sqlite_parts.len()
+            sqlite_count, 12,
+            "sqlite migration: expected 12 statements, got {sqlite_count}"
         );
 
-        let postgres_parts: Vec<_> = split_statements(super::SQL_001_POSTGRES)
+        let postgres_count = split_statements(super::SQL_001_POSTGRES)
             .into_iter()
             .filter(|s| has_executable_content(s))
-            .collect();
+            .count();
         assert_eq!(
-            postgres_parts.len(),
-            12,
-            "postgres migration: expected 12 statements, got {}",
-            postgres_parts.len()
+            postgres_count, 12,
+            "postgres migration: expected 12 statements, got {postgres_count}"
         );
     }
 }
