@@ -35,11 +35,11 @@ target-cloudflare = ["dep:solobase-cloudflare", "dep:worker", "dep:wasm-bindgen"
 
 [dependencies]
 # wafer-run with `default-features = false` so the wasm32-cloudflare build
-# doesn't pull in the `wasm` feature's reqwest + tokio (rt-multi-thread)
-# transitive deps. The `wasmi` feature stays on (lockfile loader). Site's
+# doesn't pull in wasmi + wast + wat (the user-WASM-block interpreter that
+# wafer-site doesn't use) or reqwest + tokio (rt-multi-thread). Site's
 # native runtime registers all blocks statically; it doesn't fetch remote
 # WASM blocks at runtime.
-wafer-run = { path = "../wafer-run/crates/wafer-run", default-features = false, features = ["wasmi"] }
+wafer-run = { path = "../wafer-run/crates/wafer-run", default-features = false }
 wafer-core = { path = "../wafer-run/crates/wafer-core" }
 # wafer-flow-http-server pulls wafer-run with default features (which
 # includes the `wasm` feature → reqwest + tokio rt-multi-thread). It also
