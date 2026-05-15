@@ -104,6 +104,16 @@ manual_let_else = "warn"
 [lints.rust]
 unused_must_use = "warn"
 
+# wasm32-cloudflare cold-start sits near the 400ms platform startup-CPU cap;
+# size opts win. Mirrors solobase/Cargo.toml's release profile with
+# `panic = "abort"` added — Workers retries on isolate crash anyway.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
 [patch."https://github.com/wafer-run/wafer-run"]
 wafer-run                   = { path = "../wafer-run/crates/wafer-run" }
 wafer-block                 = { path = "../wafer-run/crates/wafer-block" }
