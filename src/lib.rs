@@ -131,6 +131,11 @@ pub fn register_post_build_for_site(
     crate::blocks::registry::register(wafer, registry_cfg)
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
+    // 4c. Health block. Backs `/_health` with a deploy-time config
+    //     validation summary; the deploy script rolls back on non-200.
+    crate::blocks::health::register(wafer)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+
     // 5. Site flow + router routes. Must run *after* `build()` so our
     //    `wafer-run/router` config overwrites solobase's default.
     crate::flows::register_site_main(wafer)
