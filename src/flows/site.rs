@@ -38,6 +38,12 @@ pub fn routes() -> serde_json::Value {
         { "path": "/registry/**", "block": "wafer-run/registry" },
         { "path": "/registry",    "block": "wafer-run/registry" },
 
+        // Deploy-time config validation endpoint. Returns 200 when every
+        // block's required `ConfigVar`s have a value or a default; 503
+        // otherwise with a per-block breakdown. The deploy script gates
+        // rollback on this status code.
+        { "path": "/_health", "block": "wafer-site/health" },
+
         // Solobase-owned routes: auth (`/b/auth/*`), admin, health, etc.
         // `suppers-ai/router` is registered by `SolobaseBuilder`.
         { "path": "/b/**",                   "block": "suppers-ai/router" },
