@@ -101,6 +101,32 @@ case "$cmd" in
 
   deploy)
     "$SOLOBASE_BIN" deploy --target cloudflare
+
+    # Post-deploy health gate. `/_health` (wafer-site/health block) walks
+    # every registered block's `ConfigVar` declarations and 503s if any
+    # required key is unset. Roll back on non-200 so a misconfigured
+    # deploy doesn't sit live with the prior version's traffic.
+    #
+    # HEALTH_URL overrides the default wafer.run URL for canary /
+    # staging environments. HEALTH_SKIP=1 disables the gate (e.g. when
+    # deploying a brand-new worker whose DNS hasn't propagated yet).
+    if [[ "${HEALTH_SKIP:-0}" != "1" ]]; then
+      health_url=${HEALTH_URL:-https://wafer.run/_health}
+      echo
+      echo "Waiting for new version to propagate before /_health check…"
+      sleep 5
+      status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$health_url" || echo "000")
+      if [[ "$status" != "200" ]]; then
+        echo "error: $health_url returned $status — rolling back" >&2
+        wrangler rollback --config "$WRANGLER_TOML" \
+          --message "post-deploy /_health failed (status: $status)" || true
+        exit 1
+      fi
+      echo "$health_url: 200 — deploy complete"
+    else
+      echo "HEALTH_SKIP=1 — skipping post-deploy /_health gate"
+    fi
+
     echo
     echo "Next:"
     echo "  ./scripts/deploy-cloudflare.sh secret         # set JWT worker secret"
