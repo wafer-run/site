@@ -188,10 +188,14 @@ fn block_settings_for_site() -> BlockSettings {
 ///    `builder::post_start` + serve until shutdown.
 #[cfg(feature = "target-native")]
 pub async fn run() -> anyhow::Result<()> {
-    // 1. Load `.env` + tracing.
-    load_dotenv();
+    use anyhow::Context as _;
+
+    // 1. Load `.env` + tracing. Anchor `.env` lookup to the current dir
+    //    so `cargo run` from the repo root picks it up; solobase-cli does
+    //    the same with its `repo_root`.
+    load_dotenv(std::path::Path::new("."));
     let log_format = std::env::var("SOLOBASE_LOG_FORMAT").unwrap_or_else(|_| "text".into());
-    init_tracing(&log_format);
+    init_tracing(&log_format).context("initialize tracing subscriber")?;
     tracing::info!("wafer-site starting (solobase + WAFER runtime)");
 
     // 2. Infrastructure config (SOLOBASE_*).
@@ -213,22 +217,26 @@ pub async fn run() -> anyhow::Result<()> {
     std::fs::create_dir_all(&infra.storage_root)?;
 
     // 3. Build the WAFER runtime via the shared pre-build hook.
+    let db = solobase_native::make_sqlite_database_service(&infra.db_path)
+        .context("create sqlite database service")?;
+    let storage = solobase_native::make_local_storage_service(&infra.storage_root)
+        .context("create local storage service")?;
+    let jwt_secret = std::env::var(solobase_core::blocks::auth::JWT_SECRET_KEY)
+        .expect("SUPPERS_AI__AUTH__JWT_SECRET required");
+    let crypto = solobase_native::make_jwt_crypto_service(jwt_secret)
+        .context("create jwt crypto service")?;
     let builder = SolobaseBuilder::new()
-        .database(solobase_native::make_sqlite_database_service(
-            &infra.db_path,
-        ))
-        .storage(solobase_native::make_local_storage_service(
-            &infra.storage_root,
-        ))
+        .database(db)
+        .storage(storage)
         .config(Arc::new(
             wafer_block_config::service::EnvConfigService::new(),
         ))
-        .crypto(solobase_native::make_jwt_crypto_service(
-            std::env::var(solobase_core::blocks::auth::JWT_SECRET_KEY)
-                .expect("SUPPERS_AI__AUTH__JWT_SECRET required"),
-        ))
+        .crypto(crypto)
         .network(solobase_native::make_fetch_network_service())
         .logger(solobase_native::make_tracing_logger())
+        .config_source(Arc::new(
+            solobase_core::config_source::EnvConfigSource::new(),
+        ))
         .sqlite_db_path(&infra.db_path);
     let builder = register_blocks_for_site(builder)
         .map_err(|e| anyhow::anyhow!("register_blocks_for_site: {e}"))?;
@@ -263,7 +271,9 @@ pub async fn run() -> anyhow::Result<()> {
     builder::post_start(&wafer, &storage_block);
     tracing::info!(listen = %infra.listen, "wafer-site listening");
 
-    serve_until_shutdown(&wafer).await;
+    serve_until_shutdown(&wafer)
+        .await
+        .context("await shutdown signal")?;
     tracing::info!("wafer-site shutdown complete");
     Ok(())
 }
