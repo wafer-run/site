@@ -514,8 +514,10 @@ pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
     claims.insert("sub".to_string(), json!(user_id));
     claims.insert("email".to_string(), json!(email));
     claims.insert("type".to_string(), json!("access"));
-    let key = solobase_core::crypto::derive_block_jwt_key(TEST_JWT_SECRET, "suppers-ai/auth");
-    solobase_core::crypto::jwt_sign(&claims, Duration::from_secs(3600), &key)
+    let key = solobase_core::crypto::derive_block_jwt_key(TEST_JWT_SECRET, "suppers-ai/auth")
+        .expect("derive_block_jwt_key in test");
+    solobase_core::crypto::jwt_sign(claims, Duration::from_secs(3600), &key)
+        .expect("jwt_sign in test")
 }
 
 /// Start the site with both an admin identity *and* a non-admin identity

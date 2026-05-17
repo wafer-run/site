@@ -139,7 +139,8 @@ fn verify_jwt(
 ) -> Option<std::collections::HashMap<String, serde_json::Value>> {
     // Derived-key signing: solobase's auth block signs JWTs with HKDF-SHA256
     // of the master secret + block id ("wafer-jwt|suppers-ai/auth").
-    if let Ok(derived) = solobase_core::crypto::derive_block_jwt_key(jwt_secret, "suppers-ai/auth") {
+    if let Ok(derived) = solobase_core::crypto::derive_block_jwt_key(jwt_secret, "suppers-ai/auth")
+    {
         if let Ok(claims) = solobase_core::crypto::jwt_verify(token, &derived) {
             if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
                 return Some(claims);
