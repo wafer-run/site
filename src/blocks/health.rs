@@ -62,7 +62,11 @@ impl Block for HealthBlock {
                 }))
                 .collect::<Vec<_>>(),
         });
-        let status = if report.broken.is_empty() { "200" } else { "503" };
+        let status = if report.broken.is_empty() {
+            "200"
+        } else {
+            "503"
+        };
         let bytes = serde_json::to_vec(&body).unwrap_or_default();
         OutputStream::respond_with_meta(
             bytes,
