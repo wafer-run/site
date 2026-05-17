@@ -19,6 +19,19 @@
 #   ./scripts/deploy-cloudflare.sh seed-d1-vars       # push runtime config to D1
 #   ./scripts/deploy-cloudflare.sh tail               # stream worker logs
 #
+# First-time setup order (must run in this sequence):
+#   1. secret         — push JWT_SECRET to worker secret store
+#   2. deploy         — first cold start runs admin migrations and creates
+#                       the variables table with the proper schema
+#   3. seed-d1-vars   — push env-bound runtime config into the now-existing
+#                       variables table (depends on step 2 having run)
+#
+# Re-deploys can run in any order; `seed-d1-vars` is idempotent. The
+# previous version of this script pre-created `variables` inline with a
+# minimal schema so `seed-d1-vars` could run first, but that competed with
+# admin migration 001 and left `variables` permanently schema-drifted (see
+# the comment on the `seed-d1-vars)` branch below).
+#
 # Environment selection: ENV_FILE=.env.prod ./scripts/deploy-cloudflare.sh deploy
 #   defaults to .env if unset.
 
@@ -150,22 +163,31 @@ case "$cmd" in
     # Push every env var matching $D1_VAR_PREFIXES into the D1 admin
     # variables table. Idempotent: each key is DELETEd then INSERTed,
     # so re-running picks up changed values.
+    #
+    # PREREQUISITE: the `suppers_ai__admin__variables` table must already
+    # exist with the schema declared by admin migration 001 (see
+    # solobase-core/src/blocks/admin/migrations/001_admin_schema.sqlite.sql).
+    # That happens automatically on the first cold start after `deploy`,
+    # via `init_block(suppers-ai/admin)` in solobase-cloudflare's worker
+    # entry. Running `seed-d1-vars` before any successful `deploy` will
+    # fail with `no such table` from D1.
+    #
+    # An earlier version of this script pre-created the table inline with
+    # a minimal `(id, key, value, created_at, updated_at)` schema. That
+    # competed with migration 001's richer schema (`name`, `description`,
+    # `value`, `warning`, `sensitive INTEGER`, `updated_by`, UNIQUE on
+    # `key`, indexes): the inline `CREATE TABLE IF NOT EXISTS` won the
+    # race, migration 001 became a no-op for that table, and the missing
+    # columns were later added via D1Service's lazy
+    # `ALTER TABLE ADD COLUMN ... TEXT` — leaving `sensitive` typed as
+    # TEXT with values like `'1.0'`. Same anti-pattern that solobase #182
+    # fixed for the native bootstrap. Letting admin migration 001 own the
+    # schema is the durable fix.
     db_name=${SOLOBASE_CLOUDFLARE_D1_DATABASE_NAME:-wafer-site-prod}
     sql_file=$(mktemp --suffix=.sql)
     trap 'rm -f "$sql_file"' EXIT
 
-    # Lazy schema: solobase-cloudflare's D1Service materializes tables
-    # on first insert via `CREATE TABLE IF NOT EXISTS`, but seeding via
-    # raw wrangler bypasses that — emit the DDL here too.
-    cat >"$sql_file" <<'EOF'
-CREATE TABLE IF NOT EXISTS suppers_ai__admin__variables (
-    id TEXT PRIMARY KEY,
-    key TEXT,
-    value TEXT,
-    created_at TEXT,
-    updated_at TEXT
-);
-EOF
+    : >"$sql_file"
 
     now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     count=0
