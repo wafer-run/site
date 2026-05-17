@@ -2,23 +2,15 @@
 //!
 //! Responds to `GET /_health` with a JSON summary of every registered
 //! block's `ConfigVar` declarations. A block is considered "broken" if
-//! any non-optional declared key has neither a value in the config
-//! snapshot nor a hard-coded `default`.
+//! any non-optional declared key fails to resolve through the active
+//! `ConfigSource` and has no hard-coded default.
 //!
-//! ## Why duplicate `Wafer::validate_all_block_configs`?
-//!
-//! The canonical validator runs at startup and walks
-//! `ConfigSource::load_for_block` for each registered block. From inside
-//! a block's `handle()` we have only the [`Context`] trait — which
-//! exposes `registered_blocks()` and `config_get(key)` but not the
-//! pre-built per-block snapshots the canonical validator uses.
-//!
-//! Replicating the required-keys check against `Context` is ~30 LoC.
-//! The alternative (a `RuntimeHandle::validate_all_block_configs`
-//! passthrough) would be cleaner but requires a wafer-run change; we
-//! chose the contained duplication to keep this PR site-local. If
-//! `ConfigSource::load_for_block` ever grows semantics beyond
-//! "required key has a value or a default", this block must follow.
+//! Delegates to `Context::validate_all_block_configs` (wafer-run #106),
+//! which walks the same `ConfigSource::load_for_block` path every block
+//! uses for lazy init. Post-Phase-1 lazy init means D1-stored vars no
+//! longer live in the shared `ctx.config_get` snapshot on Cloudflare;
+//! validating against `ctx.config_get` would false-alarm on every
+//! per-block D1 var.
 //!
 //! ## Response
 //!
@@ -58,44 +50,19 @@ impl Block for HealthBlock {
     }
 
     async fn handle(&self, ctx: &dyn Context, _msg: Message, _input: InputStream) -> OutputStream {
-        let mut ok: Vec<String> = Vec::new();
-        let mut broken: Vec<(String, Vec<String>)> = Vec::new();
-
-        for info in ctx.registered_blocks() {
-            let mut missing: Vec<String> = Vec::new();
-            for cv in &info.config_keys {
-                if cv.optional {
-                    continue;
-                }
-                let present = ctx
-                    .config_get(&cv.key)
-                    .map(|v| !v.is_empty())
-                    .unwrap_or(false);
-                if !present && cv.default.is_empty() {
-                    missing.push(cv.key.clone());
-                }
-            }
-            if missing.is_empty() {
-                ok.push(info.name.clone());
-            } else {
-                missing.sort();
-                broken.push((info.name.clone(), missing));
-            }
-        }
-        ok.sort();
-        broken.sort_by(|a, b| a.0.cmp(&b.0));
+        let report = ctx.validate_all_block_configs().await;
 
         let body = serde_json::json!({
-            "ok": ok,
-            "broken": broken
+            "ok": report.ok,
+            "broken": report.broken
                 .iter()
-                .map(|(block, missing_keys)| serde_json::json!({
-                    "block": block,
-                    "missing_keys": missing_keys,
+                .map(|b| serde_json::json!({
+                    "block": b.block,
+                    "missing_keys": b.missing_keys,
                 }))
                 .collect::<Vec<_>>(),
         });
-        let status = if broken.is_empty() { "200" } else { "503" };
+        let status = if report.broken.is_empty() { "200" } else { "503" };
         let bytes = serde_json::to_vec(&body).unwrap_or_default();
         OutputStream::respond_with_meta(
             bytes,
