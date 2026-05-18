@@ -31,6 +31,15 @@ target-native = [
 # Cloudflare target: cdylib for wasm32. Pulls solobase-core with
 # default-features=false so the wasm-incompatible `llm` feature
 # (`tokio` rt-multi-thread + native `reqwest`) stays out of the build.
+#
+# Per-block feature set (Phase 0 PR E, 2026-05-18): wafer.run only
+# surfaces auth, admin, email, system, auth-ui from solobase-core
+# (see `block_settings_for_site` in src/lib.rs — every other
+# `suppers-ai/*` block is disabled at the router). Those five are
+# unconditional in solobase-core, so the cloudflare build enables
+# zero optional `block-*` features. Adding any of them here would
+# pull dead code into the cdylib — see solobase #188 for the
+# feature catalogue.
 target-cloudflare = ["dep:solobase-cloudflare", "dep:worker", "dep:wasm-bindgen"]
 
 [dependencies]
