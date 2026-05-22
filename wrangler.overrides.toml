@@ -15,3 +15,14 @@ zone_name      = "wafer.run"
 pattern        = "www.wafer.run"
 custom_domain  = true
 zone_name      = "wafer.run"
+
+# KV namespace for the per-block config-snapshot cache layered over D1.
+# Consumed by solobase-cloudflare::KvCachedD1DatabaseService via env.kv("CONFIG_CACHE").
+# Spec: workspace/docs/superpowers/specs/2026-05-22-kv-cached-d1-config-source-design.md
+#
+# One-time operator setup before first deploy:
+#   wrangler kv namespace create CONFIG_CACHE --preview false
+# Then replace the `id` placeholder below with the value wrangler prints.
+[[kv_namespaces]]
+binding = "CONFIG_CACHE"
+id      = "REPLACE_WITH_REAL_NAMESPACE_ID"
