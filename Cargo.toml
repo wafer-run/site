@@ -54,6 +54,7 @@ wafer-core = { path = "../wafer-run/crates/wafer-core" }
 # includes the `wasm` feature → reqwest + tokio rt-multi-thread). It also
 # wires native HTTP listeners, so it's native-only by design. Gated.
 wafer-flow-http-server = { path = "../wafer-run/crates/wafer-flow-http-server", optional = true }
+wafer-block           = { path = "../wafer-run/crates/wafer-block" }
 wafer-block-inspector = { path = "../wafer-run/crates/wafer-block-inspector" }
 wafer-block-web = { path = "../wafer-run/crates/wafer-block-web" }
 # wafer-block-local-storage uses std::fs — native-only.

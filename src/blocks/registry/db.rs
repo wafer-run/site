@@ -11,7 +11,8 @@ use anyhow::Result;
 use rand::RngCore;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use wafer_core::clients::database::{self as db, Filter, FilterOp, ListOptions, Record, SortField};
+use wafer_block::db::{Filter, FilterOp, ListOptions, SortField};
+use wafer_core::clients::database::{self as db, Record};
 use wafer_run::context::Context;
 
 use crate::blocks::registry::models::{
