@@ -25,4 +25,4 @@ zone_name      = "wafer.run"
 # Then replace the `id` placeholder below with the value wrangler prints.
 [[kv_namespaces]]
 binding = "CONFIG_CACHE"
-id      = "REPLACE_WITH_REAL_NAMESPACE_ID"
+id      = "f5711780bb824970b54e8f8c2a9b4db2"
