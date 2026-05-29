@@ -50,13 +50,12 @@ target-cloudflare = ["dep:solobase-cloudflare", "dep:worker", "dep:wasm-bindgen"
 wafer-run = { path = "../wafer-run/crates/wafer-run", default-features = false }
 wafer-core = { path = "../wafer-run/crates/wafer-core" }
 wafer-block           = { path = "../wafer-run/crates/wafer-block" }
-wafer-block-inspector = { path = "../wafer-run/crates/wafer-block-inspector" }
-wafer-block-web = { path = "../wafer-run/crates/wafer-block-web" }
 # wafer-block-local-storage uses std::fs — native-only.
 wafer-block-local-storage = { path = "../wafer-run/crates/wafer-block-local-storage", optional = true }
 wafer-block-config = { path = "../wafer-run/crates/wafer-block-config" }
-wafer-block-logger = { path = "../wafer-run/crates/wafer-block-logger" }
-wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
+# wafer-block-{inspector, web, logger, crypto} are NOT direct deps — they
+# arrive transitively via solobase-core / solobase-native. The [patch]
+# entries below redirect their git-sourced resolution to local paths.
 
 # Solobase platform — site is a solobase consumer.
 solobase-core       = { path = "../solobase/crates/solobase-core",       default-features = false }
