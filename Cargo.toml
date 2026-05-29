@@ -22,7 +22,6 @@ target-native = [
     "dep:tokio",
     "dep:tracing-subscriber",
     "dep:reqwest",
-    "dep:wafer-flow-http-server",
     "dep:wafer-block-local-storage",
     "solobase-core/sqlite",
     "solobase-core/storage-local",
@@ -50,10 +49,6 @@ target-cloudflare = ["dep:solobase-cloudflare", "dep:worker", "dep:wasm-bindgen"
 # WASM blocks at runtime.
 wafer-run = { path = "../wafer-run/crates/wafer-run", default-features = false }
 wafer-core = { path = "../wafer-run/crates/wafer-core" }
-# wafer-flow-http-server pulls wafer-run with default features (which
-# includes the `wasm` feature → reqwest + tokio rt-multi-thread). It also
-# wires native HTTP listeners, so it's native-only by design. Gated.
-wafer-flow-http-server = { path = "../wafer-run/crates/wafer-flow-http-server", optional = true }
 wafer-block           = { path = "../wafer-run/crates/wafer-block" }
 wafer-block-inspector = { path = "../wafer-run/crates/wafer-block-inspector" }
 wafer-block-web = { path = "../wafer-run/crates/wafer-block-web" }
