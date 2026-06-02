@@ -271,11 +271,25 @@ fn parse_session_cookie(raw: &str) -> Option<String> {
     None
 }
 
+/// Apply the admin block's migrations so `suppers_ai__admin__block_settings`
+/// exists before the registry block's `Init` runs `apply_if_blessed`, which
+/// upserts the registry's migration-state row into that table. Mirrors the
+/// production boot ordering (the admin block is registered/initialized first,
+/// creating the tracking table) and solobase-core's `TestContext::with_admin`
+/// fixture. Without this, `apply_if_blessed`'s `write_state` fails the
+/// `block_settings create` INSERT against a non-existent table.
+async fn apply_admin_migrations(ctx: &InMemoryCtx) {
+    solobase_core::blocks::admin::migrations::apply(ctx)
+        .await
+        .expect("apply admin migrations in site test fixture");
+}
+
 /// Construct the registry block with a minimal config and dispatch
 /// `LifecycleEvent::Init` against an in-memory context. Returns the context
 /// so the caller can query the seeded collections via `db::*`.
 pub async fn boot_registry_against_memory() -> Arc<InMemoryCtx> {
     let ctx = Arc::new(InMemoryCtx::new());
+    apply_admin_migrations(ctx.as_ref()).await;
 
     let cfg = RegistryConfig {
         admin_email: "test@example.invalid".into(),
@@ -384,6 +398,7 @@ async fn start_with(
     identities: HashMap<String, String>,
 ) -> (TestApp, Arc<InMemoryCtx>) {
     let ctx = Arc::new(InMemoryCtx::new_with_identities(identities));
+    apply_admin_migrations(ctx.as_ref()).await;
 
     let cfg = RegistryConfig {
         admin_email: admin_email.into(),
