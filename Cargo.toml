@@ -52,10 +52,16 @@ wafer-core = { path = "../wafer-run/crates/wafer-core" }
 wafer-block           = { path = "../wafer-run/crates/wafer-block" }
 # wafer-block-local-storage uses std::fs — native-only.
 wafer-block-local-storage = { path = "../wafer-run/crates/wafer-block-local-storage", optional = true }
-wafer-block-config = { path = "../wafer-run/crates/wafer-block-config" }
-# wafer-block-{inspector, web, logger, crypto} are NOT direct deps — they
-# arrive transitively via solobase-core / solobase-native. The [patch]
-# entries below redirect their git-sourced resolution to local paths.
+# EnvConfigService now lives in wafer-core (W3-O folded wafer-block-config in).
+# wafer-block-crypto is a direct dep: the registry's JWT verifier
+# (blocks/registry/auth.rs) derives the `suppers-ai/auth-ui` block JWT key and
+# verifies session tokens via `wafer_block_crypto::primitives`. Solobase's
+# S1-B consolidation made `solobase_core::crypto` a thin private consumer of
+# these primitives (it no longer re-exports them), so site reaches them here.
+wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
+# wafer-block-{inspector, web} are NOT direct deps — they arrive transitively
+# via solobase-core / solobase-native. The [patch] entries below redirect
+# their git-sourced resolution to local paths.
 
 # Solobase platform — site is a solobase consumer.
 solobase-core       = { path = "../solobase/crates/solobase-core",       default-features = false }
@@ -123,14 +129,12 @@ wafer-run                   = { path = "../wafer-run/crates/wafer-run" }
 wafer-block                 = { path = "../wafer-run/crates/wafer-block" }
 wafer-core                  = { path = "../wafer-run/crates/wafer-core" }
 wafer-sql-utils             = { path = "../wafer-run/crates/wafer-sql-utils" }
-wafer-block-config          = { path = "../wafer-run/crates/wafer-block-config" }
 wafer-block-cors            = { path = "../wafer-run/crates/wafer-block-cors" }
 wafer-block-crypto          = { path = "../wafer-run/crates/wafer-block-crypto" }
 wafer-block-fastembed       = { path = "../wafer-run/crates/wafer-block-fastembed" }
 wafer-block-http-listener   = { path = "../wafer-run/crates/wafer-block-http-listener" }
 wafer-block-inspector       = { path = "../wafer-run/crates/wafer-block-inspector" }
 wafer-block-local-storage   = { path = "../wafer-run/crates/wafer-block-local-storage" }
-wafer-block-logger          = { path = "../wafer-run/crates/wafer-block-logger" }
 wafer-block-network         = { path = "../wafer-run/crates/wafer-block-network" }
 wafer-block-postgres        = { path = "../wafer-run/crates/wafer-block-postgres" }
 wafer-block-readonly-guard  = { path = "../wafer-run/crates/wafer-block-readonly-guard" }

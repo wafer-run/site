@@ -7,11 +7,11 @@
 //! `META_RESP_STATUS` + `META_RESP_CONTENT_TYPE` entries.
 
 use serde::Serialize;
-use wafer_run::{
+use wafer_block::{
     meta::{META_RESP_CONTENT_TYPE, META_RESP_STATUS},
-    types::MetaEntry,
-    OutputStream,
+    MetaEntry,
 };
+use wafer_run::OutputStream;
 
 /// Build a JSON response with an explicit HTTP status. Falls back to a 500
 /// JSON error envelope if serialization fails (should never happen for the

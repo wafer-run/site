@@ -11,7 +11,11 @@
 //! No raw SQL is used: the PAT lookup goes through
 //! `wafer_core::clients::database::get_by_field`.
 
-use wafer_run::{context::Context, types::Message, OutputStream};
+use wafer_block::Message;
+use wafer_block_crypto::primitives::{derive_block_key, jwt_verify, JwtExpPolicy};
+use wafer_run::{context::Context, OutputStream};
+
+use solobase_core::blocks::auth_ui::AUTH_UI_BLOCK_ID;
 
 use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
 
@@ -133,21 +137,31 @@ fn find_jwt_token(msg: &Message) -> Option<String> {
 /// Verify a JWT against solobase's auth-block derived key, with fallback to
 /// the master secret. Mirrors `solobase_core::crypto::extract_auth_meta`
 /// except we return the claims map instead of mutating message meta.
+///
+/// Session tokens (access + refresh) are minted via `crypto::sign` in the
+/// `suppers-ai/auth-ui` block context — login, signup, refresh, and the
+/// oauth callback all dispatch in that block, and the crypto handler routes
+/// `CRYPTO_SIGN` through `sign_for(caller_id, ...)`. So the verify key is
+/// `HKDF-SHA256(master_secret, "wafer-jwt|suppers-ai/auth-ui")`, derived from
+/// [`AUTH_UI_BLOCK_ID`] — the same block id solobase's own `extract_auth_meta`
+/// uses (see solobase #155/#204). The block id is taken from the
+/// `solobase_core` constant rather than hardcoded so site tracks solobase's
+/// single source of truth for which block signs.
+///
+/// Falls back to verifying against the raw master secret for tokens minted
+/// without block derivation (e.g. unit-test fixtures), matching the fallback
+/// branch in `extract_auth_meta`.
 fn verify_jwt(
     token: &str,
     jwt_secret: &str,
 ) -> Option<std::collections::HashMap<String, serde_json::Value>> {
-    // Derived-key signing: solobase's auth block signs JWTs with HKDF-SHA256
-    // of the master secret + block id ("wafer-jwt|suppers-ai/auth").
-    if let Ok(derived) = solobase_core::crypto::derive_block_jwt_key(jwt_secret, "suppers-ai/auth")
-    {
-        if let Ok(claims) = solobase_core::crypto::jwt_verify(token, &derived) {
-            if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
-                return Some(claims);
-            }
+    let derived = derive_block_key(jwt_secret.as_bytes(), AUTH_UI_BLOCK_ID);
+    if let Ok(claims) = jwt_verify(token, derived.as_bytes(), JwtExpPolicy::Required) {
+        if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
+            return Some(claims);
         }
     }
-    if let Ok(claims) = solobase_core::crypto::jwt_verify(token, jwt_secret) {
+    if let Ok(claims) = jwt_verify(token, jwt_secret.as_bytes(), JwtExpPolicy::Required) {
         if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
             return Some(claims);
         }

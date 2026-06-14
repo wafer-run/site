@@ -41,10 +41,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use wafer_block_http_listener::{http_to_message, wafer_output_to_response};
 use wafer_run::{
-    block::Block,
-    context::Context,
-    types::{LifecycleEvent, LifecycleType, Message, WaferError},
-    InputStream, OutputStream,
+    context::Context, Block, InputStream, LifecycleEvent, LifecycleType, Message, OutputStream,
+    WaferError,
 };
 
 use wafer_site::blocks::registry::{self, handlers::RegistryBlock, RegistryConfig};
@@ -125,7 +123,7 @@ impl Context for InMemoryCtx {
             "wafer-run/storage" => self.storage_block.handle(self, msg, input).await,
             "suppers-ai/auth" => self.handle_auth_stub(msg, input).await,
             _ => OutputStream::error(WaferError::new(
-                wafer_run::types::ErrorCode::NotFound,
+                wafer_run::ErrorCode::NotFound,
                 format!("block '{block_name}' not registered in test ctx"),
             )),
         }
@@ -187,7 +185,7 @@ impl InMemoryCtx {
                         OutputStream::respond(body)
                     }
                     None => OutputStream::error(WaferError::new(
-                        wafer_run::types::ErrorCode::Unauthenticated,
+                        wafer_run::ErrorCode::Unauthenticated,
                         "auth stub: missing or unknown session cookie".to_string(),
                     )),
                 }
@@ -199,7 +197,7 @@ impl InMemoryCtx {
                 }
                 let Ok(req) = serde_json::from_slice::<Req>(&body_bytes) else {
                     return OutputStream::error(WaferError::new(
-                        wafer_run::types::ErrorCode::InvalidArgument,
+                        wafer_run::ErrorCode::InvalidArgument,
                         "auth stub: bad body".to_string(),
                     ));
                 };
@@ -239,12 +237,12 @@ impl InMemoryCtx {
                         }
                     }
                     return OutputStream::error(WaferError::new(
-                        wafer_run::types::ErrorCode::Unauthenticated,
+                        wafer_run::ErrorCode::Unauthenticated,
                         "auth stub /b/auth/api/me: no session".to_string(),
                     ));
                 }
                 OutputStream::error(WaferError::new(
-                    wafer_run::types::ErrorCode::NotFound,
+                    wafer_run::ErrorCode::NotFound,
                     format!("suppers-ai/auth stub: unhandled action {action}"),
                 ))
             }
@@ -385,7 +383,7 @@ async fn dispatch(State(state): State<AppState>, req: Request) -> Response<Body>
         .map(|a| a.ip().to_string())
         .unwrap_or_else(|| "unknown".into());
 
-    let msg = http_to_message(parts.method, path, query, &parts.headers, &remote_addr);
+    let msg = http_to_message(&parts.method, path, query, &parts.headers, &remote_addr);
     let input = InputStream::from_bytes(body_bytes);
     let output = state.block.handle(state.ctx.as_ref(), msg, input).await;
     wafer_output_to_response(output).await
@@ -523,16 +521,24 @@ pub const TEST_JWT_SECRET: &str = "test-secret";
 /// Mint a JWT of the same shape solobase's auth block issues on OAuth
 /// callback — signed with the block-derived key so `require_user`'s
 /// primary verification path succeeds.
+///
+/// Solobase mints session tokens via `crypto::sign` in the
+/// `suppers-ai/auth-ui` block context, so the signing key is
+/// `HKDF(master_secret, AUTH_UI_BLOCK_ID)`. The verifier
+/// (`registry::auth::verify_jwt`) derives the same key, so the test must mint
+/// with `AUTH_UI_BLOCK_ID` to exercise the primary (derived-key) path.
 pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
     use std::time::Duration;
+    use wafer_block_crypto::primitives::{derive_block_key, jwt_sign};
     let mut claims = HashMap::new();
     claims.insert("sub".to_string(), json!(user_id));
     claims.insert("email".to_string(), json!(email));
     claims.insert("type".to_string(), json!("access"));
-    let key = solobase_core::crypto::derive_block_jwt_key(TEST_JWT_SECRET, "suppers-ai/auth")
-        .expect("derive_block_jwt_key in test");
-    solobase_core::crypto::jwt_sign(claims, Duration::from_secs(3600), &key)
-        .expect("jwt_sign in test")
+    let key = derive_block_key(
+        TEST_JWT_SECRET.as_bytes(),
+        solobase_core::blocks::auth_ui::AUTH_UI_BLOCK_ID,
+    );
+    jwt_sign(claims, Duration::from_secs(3600), key.as_bytes()).expect("jwt_sign in test")
 }
 
 /// Start the site with both an admin identity *and* a non-admin identity

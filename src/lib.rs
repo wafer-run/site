@@ -234,7 +234,7 @@ pub async fn run() -> anyhow::Result<()> {
         .database(db)
         .storage(storage)
         .config(Arc::new(
-            wafer_block_config::service::EnvConfigService::new(),
+            wafer_core::service_blocks::config::EnvConfigService::new(),
         ))
         .crypto(crypto)
         .network(solobase_native::make_fetch_network_service())

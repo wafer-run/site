@@ -1,8 +1,9 @@
 //! HTTP request handler and route dispatcher for the registry block.
 
+use wafer_block::types::CollectionSchema;
 use wafer_run::{
-    types::CollectionSchema, Block, BlockCategory, BlockInfo, Context, InputStream, InstanceMode,
-    LifecycleEvent, LifecycleType, Message, OutputStream, WaferError,
+    Block, BlockCategory, BlockInfo, Context, InputStream, InstanceMode, LifecycleEvent,
+    LifecycleType, Message, OutputStream, WaferError,
 };
 
 use crate::blocks::registry::{db, routes, RegistryConfig, NAME};
