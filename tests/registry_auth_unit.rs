@@ -17,8 +17,7 @@ use std::collections::HashMap;
 
 use sha2::{Digest, Sha256};
 use wafer_core::clients::database as db;
-use wafer_run::types::Message;
-use wafer_run::OutputStream;
+use wafer_run::{Message, OutputStream};
 
 use wafer_site::blocks::registry::{
     self,
@@ -44,7 +43,7 @@ async fn status_of(out: OutputStream) -> u16 {
         .expect("status-carrying response");
     buf.meta
         .iter()
-        .find(|m| m.key == wafer_run::meta::META_RESP_STATUS)
+        .find(|m| m.key == wafer_run::META_RESP_STATUS)
         .expect("response carries status meta")
         .value
         .parse()
@@ -58,7 +57,7 @@ async fn status_and_body(out: OutputStream) -> (u16, Vec<u8>) {
     let status = buf
         .meta
         .iter()
-        .find(|m| m.key == wafer_run::meta::META_RESP_STATUS)
+        .find(|m| m.key == wafer_run::META_RESP_STATUS)
         .expect("status meta")
         .value
         .parse()
