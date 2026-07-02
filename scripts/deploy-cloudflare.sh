@@ -15,22 +15,30 @@
 # Usage:
 #   ./scripts/deploy-cloudflare.sh                    # build + deploy
 #   ./scripts/deploy-cloudflare.sh build              # build only
-#   ./scripts/deploy-cloudflare.sh secret             # set JWT worker secret
-#   ./scripts/deploy-cloudflare.sh seed-d1-vars       # push runtime config to D1
+#   ./scripts/deploy-cloudflare.sh secret             # set worker secrets (JWT + deploy token)
 #   ./scripts/deploy-cloudflare.sh tail               # stream worker logs
 #
-# First-time setup order (must run in this sequence):
-#   1. secret         — push JWT_SECRET to worker secret store
-#   2. deploy         — first cold start runs admin migrations and creates
-#                       the variables table with the proper schema
-#   3. seed-d1-vars   — push env-bound runtime config into the now-existing
-#                       variables table (depends on step 2 having run)
+# Deploy flow: `deploy` shells out to `solobase deploy --target cloudflare`,
+# which is atomic — it uploads a new worker version without routing traffic
+# to it, POSTs to that version's `/_deploy/init` (authenticated with
+# SOLOBASE_DEPLOY_TOKEN) to run migrations + seeds, and only promotes the
+# version to 100% traffic if that call succeeds. There's no separate manual
+# seeding step anymore: migrations/seeds run in-worker as part of every
+# deploy, gated on that same call succeeding.
 #
-# Re-deploys can run in any order; `seed-d1-vars` is idempotent. The
-# previous version of this script pre-created `variables` inline with a
-# minimal schema so `seed-d1-vars` could run first, but that competed with
-# admin migration 001 and left `variables` permanently schema-drifted (see
-# the comment on the `seed-d1-vars)` branch below).
+# First-time setup for a brand-new worker:
+#   1. secret   — push SUPPERS_AI__AUTH__JWT_SECRET + SOLOBASE_DEPLOY_TOKEN
+#                 to the worker secret store (requires a prior `build` so
+#                 wrangler.toml exists)
+#   2. deploy   — runs the atomic flow above
+#
+# A worker that has never been deployed has no secrets set yet, so if you
+# run `deploy` before `secret`, `/_deploy/init` 404s (secret unset ⇒ endpoint
+# disabled) and the version is uploaded but never promoted — harmless, and
+# it leaves wrangler.toml in place for the `secret` step. Sequence is then:
+# deploy (fails, pre-promote) → secret → deploy (succeeds). Re-deploys after
+# that can just run `deploy`; secrets don't need to be re-pushed unless
+# rotating them.
 #
 # Environment selection: ENV_FILE=.env.prod ./scripts/deploy-cloudflare.sh deploy
 #   defaults to .env if unset.
@@ -82,30 +90,6 @@ echo "using solobase: $SOLOBASE_BIN"
 
 WRANGLER_TOML="$SITE_ROOT/target/solobase-cloudflare/wrangler.toml"
 
-# Variable-name prefixes whose values belong in D1's runtime config table
-# (`suppers_ai__admin__variables`). The worker reads from there at cold
-# start. Solobase deploy creds (CLOUDFLARE_*, SOLOBASE_CLOUDFLARE_*) and
-# native-only infra (SOLOBASE_DB_PATH, SOLOBASE_LISTEN, etc.) are
-# excluded.
-D1_VAR_PREFIXES='^(SOLOBASE_SHARED__|SUPPERS_AI__|WAFER_RUN__)'
-# JWT secret lives as a worker secret (set via `secret` subcommand), not
-# in D1 — the worker reads it from `env.secret(JWT_SECRET_KEY)` directly.
-D1_VAR_BLOCKLIST='^SUPPERS_AI__AUTH__JWT_SECRET$'
-
-# Generate UUIDs for the inserted rows.
-gen_uuid() {
-  if [[ -r /proc/sys/kernel/random/uuid ]]; then
-    cat /proc/sys/kernel/random/uuid
-  else
-    # Fallback: 32 hex chars, dashed.
-    od -An -N16 -tx1 /dev/urandom | tr -d ' \n' \
-      | sed 's/\(........\)\(....\)\(....\)\(....\)\(.*\)/\1-\2-\3-\4-\5/'
-  fi
-}
-
-# SQL-escape a value for single-quoted literals (' → '').
-sql_escape() { printf '%s' "$1" | sed "s/'/''/g"; }
-
 cmd=${1:-deploy}
 case "$cmd" in
   build)
@@ -113,6 +97,16 @@ case "$cmd" in
     ;;
 
   deploy)
+    # Fail fast, before the (multi-minute) wasm build, if the deploy token
+    # isn't in the environment. `solobase deploy` itself also refuses to
+    # run without it, but checking here avoids burning a build first.
+    if [[ -z "${SOLOBASE_DEPLOY_TOKEN:-}" ]]; then
+      echo "error: SOLOBASE_DEPLOY_TOKEN not in $ENV_FILE (or exported)." >&2
+      echo "       Run './scripts/deploy-cloudflare.sh secret' to provision it," >&2
+      echo "       then export the same value before re-running deploy." >&2
+      exit 1
+    fi
+
     "$SOLOBASE_BIN" deploy --target cloudflare
 
     # Post-deploy health gate. `/_health` (wafer-site/health block) walks
@@ -139,11 +133,6 @@ case "$cmd" in
     else
       echo "HEALTH_SKIP=1 — skipping post-deploy /_health gate"
     fi
-
-    echo
-    echo "Next:"
-    echo "  ./scripts/deploy-cloudflare.sh secret         # set JWT worker secret"
-    echo "  ./scripts/deploy-cloudflare.sh seed-d1-vars   # push runtime config to D1"
     ;;
 
   secret)
@@ -157,61 +146,18 @@ case "$cmd" in
     fi
     printf '%s' "$SUPPERS_AI__AUTH__JWT_SECRET" \
       | wrangler secret put SUPPERS_AI__AUTH__JWT_SECRET --config "$WRANGLER_TOML"
-    ;;
 
-  seed-d1-vars)
-    # Push every env var matching $D1_VAR_PREFIXES into the D1 admin
-    # variables table. Idempotent: each key is DELETEd then INSERTed,
-    # so re-running picks up changed values.
-    #
-    # PREREQUISITE: the `suppers_ai__admin__variables` table must already
-    # exist with the schema declared by admin migration 001 (see
-    # solobase-core/src/blocks/admin/migrations/001_admin_schema.sqlite.sql).
-    # That happens automatically on the first cold start after `deploy`,
-    # via `init_block(suppers-ai/admin)` in solobase-cloudflare's worker
-    # entry. Running `seed-d1-vars` before any successful `deploy` will
-    # fail with `no such table` from D1.
-    #
-    # An earlier version of this script pre-created the table inline with
-    # a minimal `(id, key, value, created_at, updated_at)` schema. That
-    # competed with migration 001's richer schema (`name`, `description`,
-    # `value`, `warning`, `sensitive INTEGER`, `updated_by`, UNIQUE on
-    # `key`, indexes): the inline `CREATE TABLE IF NOT EXISTS` won the
-    # race, migration 001 became a no-op for that table, and the missing
-    # columns were later added via D1Service's lazy
-    # `ALTER TABLE ADD COLUMN ... TEXT` — leaving `sensitive` typed as
-    # TEXT with values like `'1.0'`. Same anti-pattern that solobase #182
-    # fixed for the native bootstrap. Letting admin migration 001 own the
-    # schema is the durable fix.
-    db_name=${SOLOBASE_CLOUDFLARE_D1_DATABASE_NAME:-wafer-site-prod}
-    sql_file=$(mktemp --suffix=.sql)
-    trap 'rm -f "$sql_file"' EXIT
-
-    : >"$sql_file"
-
-    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    count=0
-    while IFS= read -r var; do
-      [[ "$var" =~ $D1_VAR_BLOCKLIST ]] && continue
-      val=${!var:-}
-      [[ -z "$val" ]] && continue
-      key_esc=$(sql_escape "$var")
-      val_esc=$(sql_escape "$val")
-      uuid=$(gen_uuid)
-      cat >>"$sql_file" <<EOF
-DELETE FROM suppers_ai__admin__variables WHERE key = '$key_esc';
-INSERT INTO suppers_ai__admin__variables (id, key, value, created_at, updated_at)
-VALUES ('$uuid', '$key_esc', '$val_esc', '$now', '$now');
-EOF
-      count=$((count + 1))
-    done < <(compgen -e | grep -E "$D1_VAR_PREFIXES" | sort)
-
-    if [[ $count -eq 0 ]]; then
-      echo "no D1-bound vars in $ENV_FILE (looking for $D1_VAR_PREFIXES)"
-      exit 0
+    if [[ -z "${SOLOBASE_DEPLOY_TOKEN:-}" ]]; then
+      echo "error: SOLOBASE_DEPLOY_TOKEN not in $ENV_FILE" >&2
+      exit 1
     fi
-    echo "seeding $count vars into D1 ($db_name)…"
-    wrangler d1 execute "$db_name" --remote --file "$sql_file"
+    # Deploy-init auth token: the worker's `/_deploy/init` endpoint (hit by
+    # `solobase deploy` pre-promote, to run migrations + seeds) compares the
+    # `x-deploy-token` header against this same secret. The same value must
+    # also be exported as SOLOBASE_DEPLOY_TOKEN in the shell that runs
+    # `deploy`, so the CLI can send it.
+    printf '%s' "$SOLOBASE_DEPLOY_TOKEN" \
+      | wrangler secret put SOLOBASE_DEPLOY_TOKEN --config "$WRANGLER_TOML"
     ;;
 
   tail)
@@ -223,7 +169,7 @@ EOF
     ;;
 
   *)
-    echo "usage: $0 [build|deploy|secret|seed-d1-vars|tail]" >&2
+    echo "usage: $0 [build|deploy|secret|tail]" >&2
     exit 1
     ;;
 esac
