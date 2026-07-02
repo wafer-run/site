@@ -41,7 +41,7 @@ The crate also builds as a `wasm32-unknown-unknown` cdylib for Cloudflare Worker
 ```bash
 ./scripts/deploy-cloudflare.sh             # build + wrangler deploy + R2 upload
 ./scripts/deploy-cloudflare.sh build       # build only
-./scripts/deploy-cloudflare.sh secret      # set the JWT worker secret
+./scripts/deploy-cloudflare.sh secret      # set worker secrets (JWT + deploy token)
 ./scripts/deploy-cloudflare.sh tail        # stream worker logs
 ```
 
@@ -49,8 +49,9 @@ First-time setup needs Workers + D1 + R2 on a Cloudflare account, plus:
 
 1. `wrangler d1 create wafer-site-prod` — copy the printed id into `.env` as `SOLOBASE_CLOUDFLARE_D1_DATABASE_ID`
 2. `wrangler r2 bucket create wafer-site-assets`
-3. Fill in `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in `.env`
-4. `./scripts/deploy-cloudflare.sh`
+3. Fill in `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `SOLOBASE_DEPLOY_TOKEN` (any random string — same value must be exported when running `deploy`) in `.env`
+4. `./scripts/deploy-cloudflare.sh build` then `./scripts/deploy-cloudflare.sh secret` — pushes the JWT + deploy-token worker secrets (needs `build` first so `wrangler.toml` exists)
+5. `./scripts/deploy-cloudflare.sh` — deploy is atomic: it uploads a version, runs migrations/seeds via an authenticated `/_deploy/init` call, and only promotes on success. No manual DB seeding step.
 
 `solobase.toml` holds per-site Cloudflare config (worker name, D1/R2 bindings); `wrangler.overrides.toml` adds the custom-domain routes. v1 of the cloudflare deploy serves solobase + registry routes only — the static SPA chrome stays native-only until the content block is refactored to read through the configured storage service.
 
