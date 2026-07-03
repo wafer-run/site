@@ -309,3 +309,13 @@ async fn fetch_main(
     )
     .await
 }
+
+/// Cloudflare Worker `start` entrypoint: one-time isolate initialization
+/// (request-log queueing mode) before the first fetch event. `run()` keeps
+/// a once-guard fallback, so this is the proper home rather than a hard
+/// requirement.
+#[cfg(feature = "target-cloudflare")]
+#[worker::event(start)]
+fn start() {
+    solobase_cloudflare::init_isolate();
+}
