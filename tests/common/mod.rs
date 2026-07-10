@@ -137,6 +137,20 @@ impl Context for InMemoryCtx {
         None
     }
 
+    // The trait default fails closed ("context does not implement
+    // resource-access enforcement") since wafer-run SP-A; this fixture
+    // routes to real Database/Storage blocks, so migrations' DDL would be
+    // denied without an explicit permissive override. Mirrors
+    // solobase-core's `MigrationTestCtx` (tests/auth/common.rs).
+    fn check_resource_access(
+        &self,
+        _resource: &str,
+        _resource_type: wafer_run::ResourceType,
+        _is_write: bool,
+    ) -> Result<(), WaferError> {
+        Ok(())
+    }
+
     fn clone_arc(&self) -> Arc<dyn Context> {
         // Cheap: every interior field is `Arc`-shared.
         Arc::new(self.clone())
