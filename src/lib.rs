@@ -263,17 +263,33 @@ pub async fn run() -> anyhow::Result<()> {
     register_post_build_for_site(&mut wafer, content_storage)
         .map_err(|e| anyhow::anyhow!("register_post_build_for_site: {e}"))?;
 
-    // 6. Native-only wiring: HTTP listener + observability + start.
+    // 6. Native-only wiring: HTTP listener + observability + boot.
     register_http_listener(&mut wafer, &infra.listen, "wafer-site-main");
     register_observability_hooks(&mut wafer);
 
-    let wafer = wafer
-        .start()
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to start WAFER runtime: {e}"))?;
+    // Boot through the shared funnel (seal → init_block(admin) →
+    // init_all_blocks → post_start), then run the native-only Start
+    // lifecycle + socket bind — the same sequence as solobase's native
+    // server. Admin-first init guarantees admin's migrations create
+    // `suppers_ai__admin__block_settings` before any other block's Init
+    // writes its migration state there; the previous plain `start()` left
+    // init order to HashMap iteration and llm/registry could permanent-fail
+    // on the missing table on a fresh database. The site seeds its config
+    // from env pre-build (like native solobase), so the seed hook is a no-op.
+    struct SiteBootHooks;
 
-    // Inject WRAP grants into the storage block (cross-block access control).
-    builder::post_start(&wafer, &storage_block);
+    #[wafer_block::wafer_async_trait]
+    impl builder::BootHooks for SiteBootHooks {
+        async fn seed_after_admin_init(&self, _wafer: &wafer_run::Wafer) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    builder::boot(&mut wafer, &storage_block, &SiteBootHooks)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to boot WAFER runtime: {e}"))?;
+    wafer.run_start_lifecycle().await;
+    let wafer = wafer.bind_all();
     tracing::info!(listen = %infra.listen, "wafer-site listening");
 
     serve_until_shutdown(&wafer)
