@@ -191,6 +191,7 @@ pub async fn latest_version_for(ctx: &dyn Context, package_id: &str) -> Result<O
         limit: 100,
         offset: 0,
         skip_count: false,
+        ..Default::default()
     };
     let res = db::list(ctx, VERSIONS, &opts)
         .await
@@ -234,6 +235,7 @@ pub async fn list_packages(
         limit: per_page,
         offset,
         skip_count: false,
+        ..Default::default()
     };
     let pkgs = db::list(ctx, PACKAGES, &opts)
         .await
