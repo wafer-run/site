@@ -1,8 +1,8 @@
 //! Unit tests for the Task-11 admin gate.
 //!
-//! The registry-bootstrap harness doesn't wire `suppers-ai/auth`, so tests
+//! The registry-bootstrap harness doesn't wire `wafer-run/auth`, so tests
 //! that exercise the auth-block delegation path are deferred to Tasks 12–13
-//! (which need a full solobase runtime anyway). What we can cover here:
+//! (which need a full impresspress runtime anyway). What we can cover here:
 //!
 //! 1. `require_user`: bearer-PAT resolution against `registry_tokens`.
 //! 2. `require_admin`: non-admin email (empty, because `fetch_email` has
@@ -141,7 +141,7 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
 #[tokio::test]
 async fn missing_credentials_delegates_to_auth_block_and_returns_401() {
     // No PAT, no cookie — the auth-block delegation path runs and fails
-    // (no `suppers-ai/auth` in the in-memory harness). `require_user` must
+    // (no `wafer-run/auth` in the in-memory harness). `require_user` must
     // surface that as the 401 `unauthorized` JSON.
     let ctx = common::boot_registry_against_memory().await;
 

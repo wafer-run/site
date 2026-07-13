@@ -18,18 +18,18 @@ jobs:
         with:
           repository: wafer-run/wafer-run
           path: wafer-run
-      - name: Checkout solobase
+      - name: Checkout impresspress
         uses: actions/checkout@v4
         with:
-          repository: suppers-ai/solobase
-          path: solobase
+          repository: impresspress/impresspress
+          path: impresspress
       - name: Set site env
         run: |
-          echo "SUPPERS_AI__AUTH__JWT_SECRET=ci-test-secret-not-for-prod-padding-to-pass-length-check" >> $GITHUB_ENV
+          echo "WAFER_RUN__AUTH__JWT_SECRET=ci-test-secret-not-for-prod-padding-to-pass-length-check" >> $GITHUB_ENV
           echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
-          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
-          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
-          echo "SOLOBASE_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
+          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
+          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
+          echo "WAFER_RUN_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -57,18 +57,18 @@ jobs:
         with:
           repository: wafer-run/wafer-run
           path: wafer-run
-      - name: Checkout solobase
+      - name: Checkout impresspress
         uses: actions/checkout@v4
         with:
-          repository: suppers-ai/solobase
-          path: solobase
+          repository: impresspress/impresspress
+          path: impresspress
       - name: Set site env
         run: |
-          echo "SUPPERS_AI__AUTH__JWT_SECRET=ci-test-secret-not-for-prod-padding-to-pass-length-check" >> $GITHUB_ENV
+          echo "WAFER_RUN__AUTH__JWT_SECRET=ci-test-secret-not-for-prod-padding-to-pass-length-check" >> $GITHUB_ENV
           echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
-          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
-          echo "SOLOBASE_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
-          echo "SOLOBASE_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
+          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
+          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
+          echo "WAFER_RUN_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install Node
@@ -88,9 +88,9 @@ jobs:
         working-directory: site
         run: |
           mkdir -p data
-          SOLOBASE_DB_PATH=./data/ci.sqlite \
-          SOLOBASE_STORAGE_ROOT=./data/storage \
-          SOLOBASE_LISTEN=0.0.0.0:8090 \
+          IMPRESSPRESS_DB_PATH=./data/ci.sqlite \
+          IMPRESSPRESS_STORAGE_ROOT=./data/storage \
+          IMPRESSPRESS_LISTEN=0.0.0.0:8090 \
           ./target/release/wafer-site > /tmp/site.log 2>&1 &
           echo $! > /tmp/site.pid
           # Wait for HTTP to come up

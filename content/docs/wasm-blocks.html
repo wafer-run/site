@@ -39,7 +39,7 @@ BEFORE_BODY_CLOSE: switch_tab_script.html
 <p>Use <code>wafer new &lt;name&gt; --lang &lt;rust|go|ts&gt;</code> to scaffold a project with a pre-filled manifest.</p>
 
 <h3>Auto-Discovery</h3>
-<p>Solobase automatically discovers WASM blocks on startup by scanning the <code>blocks/</code> directory for built artifacts. Any path matching <code>blocks/**/target/block.wasm</code> is loaded — no explicit registration required.</p>
+<p>Impresspress automatically discovers WASM blocks on startup by scanning the <code>blocks/</code> directory for built artifacts. Any path matching <code>blocks/**/target/block.wasm</code> is loaded — no explicit registration required.</p>
 <pre><code>blocks/
   myorg-hello/
     manifest.json
@@ -55,11 +55,11 @@ BEFORE_BODY_CLOSE: switch_tab_script.html
 <ol>
     <li>Edit your block source code</li>
     <li>Run <code>wafer build</code> in the block directory — produces <code>target/block.wasm</code></li>
-    <li>Restart Solobase — it re-scans <code>blocks/</code> and loads the updated block</li>
+    <li>Restart Impresspress — it re-scans <code>blocks/</code> and loads the updated block</li>
 </ol>
 <pre><code># In the block directory
 wafer build
-# Then restart solobase (Ctrl+C and re-run, or use cargo-watch)</code></pre>
+# Then restart impresspress (Ctrl+C and re-run, or use cargo-watch)</code></pre>
 
 <h3>Guest SDKs</h3>
 

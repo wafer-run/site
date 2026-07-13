@@ -2,12 +2,12 @@
 
 The website, docs, playground, and package registry behind [wafer.run](https://wafer.run).
 
-Built on [WAFER](https://github.com/wafer-run/wafer-run) + [solobase](https://github.com/suppers-ai/solobase) — both must be checked out as siblings (path deps in `Cargo.toml`):
+Built on [WAFER](https://github.com/wafer-run/wafer-run) + [impresspress](https://github.com/impresspress/impresspress) — both must be checked out as siblings (path deps in `Cargo.toml`):
 
 ```
 workspace/
 ├── wafer-run/
-├── solobase/
+├── impresspress/
 └── site/        # this repo
 ```
 
@@ -20,8 +20,8 @@ cargo run                  # listens on http://localhost:8090
 
 `.env.example` documents every variable the binary reads. The defaults work for a local dev run; you only have to fill in:
 
-- `SUPPERS_AI__AUTH__JWT_SECRET` — any random string
-- `SOLOBASE_SHARED__AUTH__BOOTSTRAP_ADMIN_EMAIL` and `WAFER_RUN__REGISTRY__ADMIN_EMAIL` — your email
+- `WAFER_RUN__AUTH__JWT_SECRET` — any random string
+- `WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_EMAIL` and `WAFER_RUN__REGISTRY__ADMIN_EMAIL` — your email
 - The `*GITHUB*` triple if you want OAuth login
 
 ## Tests
@@ -47,13 +47,13 @@ The crate also builds as a `wasm32-unknown-unknown` cdylib for Cloudflare Worker
 
 First-time setup needs Workers + D1 + R2 on a Cloudflare account, plus:
 
-1. `wrangler d1 create wafer-site-prod` — copy the printed id into `.env` as `SOLOBASE_CLOUDFLARE_D1_DATABASE_ID`
+1. `wrangler d1 create wafer-site-prod` — copy the printed id into `.env` as `IMPRESSPRESS_CLOUDFLARE_D1_DATABASE_ID`
 2. `wrangler r2 bucket create wafer-site-assets`
-3. Fill in `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `SOLOBASE_DEPLOY_TOKEN` (any random string — same value must be exported when running `deploy`) in `.env`
+3. Fill in `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `IMPRESSPRESS_DEPLOY_TOKEN` (any random string — same value must be exported when running `deploy`) in `.env`
 4. `./scripts/deploy-cloudflare.sh build` then `./scripts/deploy-cloudflare.sh secret` — pushes the JWT + deploy-token worker secrets (needs `build` first so `wrangler.toml` exists)
 5. `./scripts/deploy-cloudflare.sh` — deploy is atomic: it uploads a version, runs migrations/seeds via an authenticated `/_deploy/init` call, and only promotes on success. No manual DB seeding step.
 
-`solobase.toml` holds per-site Cloudflare config (worker name, D1/R2 bindings); `wrangler.overrides.toml` adds the custom-domain routes. v1 of the cloudflare deploy serves solobase + registry routes only — the static SPA chrome stays native-only until the content block is refactored to read through the configured storage service.
+`impresspress.toml` holds per-site Cloudflare config (worker name, D1/R2 bindings); `wrangler.overrides.toml` adds the custom-domain routes. v1 of the cloudflare deploy serves impresspress + registry routes only — the static SPA chrome stays native-only until the content block is refactored to read through the configured storage service.
 
 ## Layout
 

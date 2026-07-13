@@ -14,32 +14,32 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["target-native"]
-# Native target: includes solobase-native + the LocalStorageService-backed
-# blocks::content. Enables solobase-core's default features (sqlite +
+# Native target: includes impresspress-native + the LocalStorageService-backed
+# blocks::content. Enables impresspress-core's default features (sqlite +
 # storage-local + llm) so the binary keeps the same behaviour as before.
 target-native = [
-    "dep:solobase-native",
+    "dep:impresspress-native",
     "dep:tokio",
     "dep:tracing-subscriber",
     "dep:reqwest",
     "dep:wafer-block-local-storage",
-    "solobase-core/sqlite",
-    "solobase-core/storage-local",
-    "solobase-core/llm",
+    "impresspress-core/sqlite",
+    "impresspress-core/storage-local",
+    "impresspress-core/llm",
 ]
-# Cloudflare target: cdylib for wasm32. Pulls solobase-core with
+# Cloudflare target: cdylib for wasm32. Pulls impresspress-core with
 # default-features=false so the wasm-incompatible `llm` feature
 # (`tokio` rt-multi-thread + native `reqwest`) stays out of the build.
 #
 # Per-block feature set (Phase 0 PR E, 2026-05-18): wafer.run only
-# surfaces auth, admin, email, system, auth-ui from solobase-core
+# surfaces auth, admin, email, system, auth-ui from impresspress-core
 # (see `block_settings_for_site` in src/lib.rs — every other
-# `suppers-ai/*` block is disabled at the router). Those five are
-# unconditional in solobase-core, so the cloudflare build enables
+# `impresspress/*` block is disabled at the router). Those five are
+# unconditional in impresspress-core, so the cloudflare build enables
 # zero optional `block-*` features. Adding any of them here would
-# pull dead code into the cdylib — see solobase #188 for the
+# pull dead code into the cdylib — see impresspress #188 for the
 # feature catalogue.
-target-cloudflare = ["dep:solobase-cloudflare", "dep:worker", "dep:wasm-bindgen"]
+target-cloudflare = ["dep:impresspress-cloudflare", "dep:worker", "dep:wasm-bindgen"]
 
 [dependencies]
 # wafer-run with `default-features = false` so the wasm32-cloudflare build
@@ -54,19 +54,19 @@ wafer-block           = { path = "../wafer-run/crates/wafer-block" }
 wafer-block-local-storage = { path = "../wafer-run/crates/wafer-block-local-storage", optional = true }
 # EnvConfigService now lives in wafer-core (W3-O folded wafer-block-config in).
 # wafer-block-crypto is a direct dep: the registry's JWT verifier
-# (blocks/registry/auth.rs) derives the `suppers-ai/auth-ui` block JWT key and
-# verifies session tokens via `wafer_block_crypto::primitives`. Solobase's
-# S1-B consolidation made `solobase_core::crypto` a thin private consumer of
+# (blocks/registry/auth.rs) derives the `impresspress/auth-ui` block JWT key and
+# verifies session tokens via `wafer_block_crypto::primitives`. Impresspress's
+# S1-B consolidation made `impresspress_core::crypto` a thin private consumer of
 # these primitives (it no longer re-exports them), so site reaches them here.
 wafer-block-crypto = { path = "../wafer-run/crates/wafer-block-crypto" }
 # wafer-block-{inspector, web} are NOT direct deps — they arrive transitively
-# via solobase-core / solobase-native. The [patch] entries below redirect
+# via impresspress-core / impresspress-native. The [patch] entries below redirect
 # their git-sourced resolution to local paths.
 
-# Solobase platform — site is a solobase consumer.
-solobase-core       = { path = "../solobase/crates/solobase-core",       default-features = false }
-solobase-native     = { path = "../solobase/crates/solobase-native",     optional = true }
-solobase-cloudflare = { path = "../solobase/crates/solobase-cloudflare", optional = true }
+# Impresspress platform — site is a impresspress consumer.
+impresspress-core       = { path = "../impresspress/crates/impresspress-core",       default-features = false }
+impresspress-native     = { path = "../impresspress/crates/impresspress-native",     optional = true }
+impresspress-cloudflare = { path = "../impresspress/crates/impresspress-cloudflare", optional = true }
 
 # Cloudflare-only deps (gated behind target-cloudflare).
 worker       = { version = "0.7.5", features = ["d1"], optional = true }
@@ -115,7 +115,7 @@ manual_let_else = "warn"
 unused_must_use = "warn"
 
 # wasm32-cloudflare cold-start sits near the 400ms platform startup-CPU cap;
-# size opts win. Mirrors solobase/Cargo.toml's release profile with
+# size opts win. Mirrors impresspress/Cargo.toml's release profile with
 # `panic = "abort"` added — Workers retries on isolate crash anyway.
 [profile.release]
 opt-level = "z"

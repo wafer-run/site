@@ -6,7 +6,7 @@
 //! uses it as a login-probe after exchanging a device code.
 //!
 //! Unauthenticated callers get the 401 envelope that `require_user`
-//! produces via `suppers-ai/auth`. We don't build it by hand here.
+//! produces via `wafer-run/auth`. We don't build it by hand here.
 
 use serde_json::json;
 use wafer_run::{Context, Message, OutputStream};

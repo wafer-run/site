@@ -10,7 +10,7 @@ test.describe('GitHub OAuth login surface', () => {
     await expect(githubButton).toBeVisible();
     await expect(githubButton).toContainText(/Continue with GitHub/i);
 
-    // 2. The new chrome is in effect — wafer.run brand, not Solobase
+    // 2. The new chrome is in effect — wafer.run brand, not Impresspress
     await expect(page).toHaveTitle(/wafer\.run/i);
 
     // 3. Signup is closed (we set ALLOW_SIGNUP=false in .env)

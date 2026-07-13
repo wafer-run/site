@@ -4,7 +4,7 @@
 //!
 //! - [`require_user`] — resolve the caller to an `AuthedUser` by checking a
 //!   Bearer PAT against `registry_tokens` first, then falling back to
-//!   verifying a solobase-issued JWT (Bearer header or `auth_token` cookie).
+//!   verifying a impresspress-issued JWT (Bearer header or `auth_token` cookie).
 //! - [`require_admin`] — wraps `require_user` and additionally gates on the
 //!   configured admin email. Non-admins get the "coming-soon" response.
 //!
@@ -15,7 +15,7 @@ use wafer_block::Message;
 use wafer_block_crypto::primitives::{derive_block_key, jwt_verify, JwtExpPolicy};
 use wafer_run::{context::Context, OutputStream};
 
-use solobase_core::blocks::auth_ui::AUTH_UI_BLOCK_ID;
+use impresspress_core::blocks::auth_ui::AUTH_UI_BLOCK_ID;
 
 use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
 
@@ -48,9 +48,9 @@ pub struct AuthedUser {
 ///    with a `revoked_at` set) are skipped and we fall through to step 2.
 ///    This path exists because PATs are minted by
 ///    `POST /registry/api/cli-login/exchange` and live only in the
-///    registry's own store — `suppers-ai/auth` doesn't know about them.
-/// 2. Delegate to `suppers-ai/auth` via `AUTH_REQUIRE_USER`. The session
-///    cookie (and Authorization header, for solobase-managed PATs) ride on
+///    registry's own store — `wafer-run/auth` doesn't know about them.
+/// 2. Delegate to `wafer-run/auth` via `AUTH_REQUIRE_USER`. The session
+///    cookie (and Authorization header, for impresspress-managed PATs) ride on
 ///    `http.header.*` meta keys — same convention
 ///    `wafer-run/http-listener` uses.
 ///
@@ -76,14 +76,14 @@ pub async fn require_user(
             });
         }
         // Fall through to JWT verification — a mismatched PAT might be a
-        // solobase-minted JWT.
+        // impresspress-minted JWT.
     }
 
-    // 2. Try solobase's JWT. Solobase's OAuth callback sets the signed JWT
+    // 2. Try impresspress's JWT. Impresspress's OAuth callback sets the signed JWT
     //    as `auth_token` cookie (or passes it as `Authorization: Bearer`).
-    //    Solobase's runtime router does JWT verification transparently for
+    //    Impresspress's runtime router does JWT verification transparently for
     //    `/b/**` routes via `extract_auth_meta`, but our `/registry/**` flow
-    //    bypasses the router, so we verify here. Uses solobase's own crypto
+    //    bypasses the router, so we verify here. Uses impresspress's own crypto
     //    helpers to stay consistent with the signing key derivation.
     let jwt_token = find_jwt_token(msg);
     if let Some(token) = jwt_token {
@@ -114,7 +114,7 @@ pub async fn require_user(
 }
 
 /// Find a JWT in the request — either the Authorization Bearer header or
-/// the `auth_token` cookie that solobase's OAuth callback sets.
+/// the `auth_token` cookie that impresspress's OAuth callback sets.
 fn find_jwt_token(msg: &Message) -> Option<String> {
     let auth_header = msg.header("authorization");
     if let Some(t) = auth_header.strip_prefix("Bearer ") {
@@ -134,18 +134,18 @@ fn find_jwt_token(msg: &Message) -> Option<String> {
     None
 }
 
-/// Verify a JWT against solobase's auth-block derived key, with fallback to
-/// the master secret. Mirrors `solobase_core::crypto::extract_auth_meta`
+/// Verify a JWT against impresspress's auth-block derived key, with fallback to
+/// the master secret. Mirrors `impresspress_core::crypto::extract_auth_meta`
 /// except we return the claims map instead of mutating message meta.
 ///
 /// Session tokens (access + refresh) are minted via `crypto::sign` in the
-/// `suppers-ai/auth-ui` block context — login, signup, refresh, and the
+/// `impresspress/auth-ui` block context — login, signup, refresh, and the
 /// oauth callback all dispatch in that block, and the crypto handler routes
 /// `CRYPTO_SIGN` through `sign_for(caller_id, ...)`. So the verify key is
-/// `HKDF-SHA256(master_secret, "wafer-jwt|suppers-ai/auth-ui")`, derived from
-/// [`AUTH_UI_BLOCK_ID`] — the same block id solobase's own `extract_auth_meta`
-/// uses (see solobase #155/#204). The block id is taken from the
-/// `solobase_core` constant rather than hardcoded so site tracks solobase's
+/// `HKDF-SHA256(master_secret, "wafer-jwt|impresspress/auth-ui")`, derived from
+/// [`AUTH_UI_BLOCK_ID`] — the same block id impresspress's own `extract_auth_meta`
+/// uses (see impresspress #155/#204). The block id is taken from the
+/// `impresspress_core` constant rather than hardcoded so site tracks impresspress's
 /// single source of truth for which block signs.
 ///
 /// Falls back to verifying against the raw master secret for tokens minted

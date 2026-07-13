@@ -29,16 +29,16 @@ pub struct RegistryConfig {
     /// `"registry"`.
     pub storage_key_prefix: String,
 
-    /// Shared JWT secret — same value solobase's auth block uses to mint
+    /// Shared JWT secret — same value impresspress's auth block uses to mint
     /// OAuth JWTs. Needed so `require_user` can verify `auth_token` cookies
-    /// end-to-end. Solobase's runtime router does this transparently for
+    /// end-to-end. Impresspress's runtime router does this transparently for
     /// `/b/**` routes, but `/registry/**` is routed directly from our
     /// site-main flow and bypasses that middleware.
     pub jwt_secret: String,
 
     /// If non-empty, admin-gated routes additionally require the JWT's
     /// `auth_method` claim to match this value (e.g. `"oauth.github"`).
-    /// Empty disables the check (any solobase-authenticated admin email
+    /// Empty disables the check (any impresspress-authenticated admin email
     /// is accepted — legacy behavior).
     ///
     /// The motivation is identity-assurance: an OAuth-issued token proves

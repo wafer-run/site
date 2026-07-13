@@ -57,7 +57,7 @@ struct UserProfileResponse {
 /// ```json
 /// { "token": "wafer_pat_<64hex>", "user": { "email": "admin@example.com" } }
 /// ```
-/// Email is best-effort — it comes from `suppers-ai/auth` via
+/// Email is best-effort — it comes from `wafer-run/auth` via
 /// `AUTH_USER_PROFILE`. In harnesses where the auth block isn't registered,
 /// the field is `""` rather than an error, since the CLI's PAT is already
 /// valid regardless.
@@ -109,7 +109,7 @@ async fn fetch_email(ctx: &dyn Context, user_id: &str) -> String {
         return String::new();
     };
     match ctx
-        .call_block_buffered("suppers-ai/auth", prof_msg, &body)
+        .call_block_buffered("wafer-run/auth", prof_msg, &body)
         .await
     {
         Ok(buf) => serde_json::from_slice::<UserProfileResponse>(&buf.body)

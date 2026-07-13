@@ -1,7 +1,7 @@
 //! Exercises the session-cookie branch of `registry::auth::require_user`.
 //!
 //! The pre-existing HTTP-integration tests authenticate via Bearer PAT —
-//! that path bypasses the `suppers-ai/auth` fallback entirely. This test
+//! that path bypasses the `wafer-run/auth` fallback entirely. This test
 //! covers the other branch: no PAT, cookie only, round-tripped through
 //! the auth stub's `AUTH_REQUIRE_USER` + `AUTH_USER_PROFILE` calls so the
 //! admin-email match lands end-to-end.

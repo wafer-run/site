@@ -1,4 +1,4 @@
-# Deep-merged into the wrangler.toml that `solobase build --target cloudflare`
+# Deep-merged into the wrangler.toml that `impresspress build --target cloudflare`
 # generates. Keep deployer-specific extras here so they survive build
 # regeneration (the generated wrangler.toml is overwritten every build).
 
@@ -17,7 +17,7 @@ custom_domain  = true
 zone_name      = "wafer.run"
 
 # KV namespace for the per-block config-snapshot cache layered over D1.
-# Consumed by solobase-cloudflare::KvCachedD1DatabaseService via env.kv("CONFIG_CACHE").
+# Consumed by impresspress-cloudflare::KvCachedD1DatabaseService via env.kv("CONFIG_CACHE").
 # Spec: workspace/docs/superpowers/specs/2026-05-22-kv-cached-d1-config-source-design.md
 #
 # One-time operator setup before first deploy:

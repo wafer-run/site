@@ -11,7 +11,7 @@
 //!
 //! Tests drive the real axum/reqwest HTTP path, same as `registry_read_empty`.
 //! The in-memory harness wires a `wafer-run/storage` block (LocalStorage on
-//! a tempdir) + a minimal `suppers-ai/auth` stub keyed by a seeded `user_id
+//! a tempdir) + a minimal `wafer-run/auth` stub keyed by a seeded `user_id
 //! -> email` map. PATs are seeded directly into the registry's `TOKENS`
 //! collection by `start_test_site_with_admin` / `start_test_site_with_user`.
 

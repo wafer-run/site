@@ -16,7 +16,7 @@ ACTIVE: block-capabilities
     attribute:
 </p>
 <pre><code>#[wafer_block(
-    name = "suppers-ai/auth",
+    name = "wafer-run/auth",
     version = "0.1.0",
     interface = "middleware@v1",
     summary = "Authentication middleware",
@@ -24,7 +24,7 @@ ACTIVE: block-capabilities
         crypto,
         config,
         collections = ["users", "sessions", "api_keys"],
-        config_keys = ["SUPPERS_AI__AUTH__JWT_SECRET"],
+        config_keys = ["WAFER_RUN__AUTH__JWT_SECRET"],
         callable_blocks = ["wafer-run/crypto", "wafer-run/database"],
         headers(
             readable = ["authorization", "cookie"],
@@ -66,7 +66,7 @@ ACTIVE: block-capabilities
     than the block declared.
 </p>
 <pre><code>{
-  "SUPPERS_AI__AUTH__JWT_SECRET": "...",
+  "WAFER_RUN__AUTH__JWT_SECRET": "...",
   "capabilities": {
     "network": false,
     "collections": ["users"],
@@ -80,7 +80,7 @@ ACTIVE: block-capabilities
     when the block declared <code>network: false</code>), the narrower declaration
     wins and a warning surfaces:
 </p>
-<pre><code>WARN block=suppers-ai/auth field=network: config widened capability beyond declared — narrower declaration wins</code></pre>
+<pre><code>WARN block=wafer-run/auth field=network: config widened capability beyond declared — narrower declaration wins</code></pre>
 <p>
     The reserved <code>capabilities</code> key is stripped from the block's runtime
     config — your block code will not see it via <code>ctx.config_get("capabilities")</code>.
@@ -119,11 +119,11 @@ ACTIVE: block-capabilities
     caps that are actually enforced on WASM blocks.
 </p>
 
-<h3>Follow-up: Solobase-Specific Guidance</h3>
+<h3>Follow-up: Impresspress-Specific Guidance</h3>
 <p>
-    The solobase repository (separate codebase) maintains its own parallel documentation
-    page describing how each solobase block (<code>suppers-ai/auth</code>,
-    <code>suppers-ai/iam-guard</code>, etc.) declares and narrows capabilities. That page
-    is authored in the solobase repo, not here. When Spec 2B adoption rolls out to
-    solobase blocks, the solobase docs get the parallel update.
+    The impresspress repository (separate codebase) maintains its own parallel documentation
+    page describing how each impresspress block (<code>wafer-run/auth</code>,
+    <code>impresspress/iam-guard</code>, etc.) declares and narrows capabilities. That page
+    is authored in the impresspress repo, not here. When Spec 2B adoption rolls out to
+    impresspress blocks, the impresspress docs get the parallel update.
 </p>

@@ -4,13 +4,13 @@
 # Prerequisites (one-time):
 #   1. wrangler CLI installed and `wrangler login` (or set CLOUDFLARE_API_TOKEN)
 #   2. wrangler d1 create <name>          → put the id in .env
-#   3. wrangler r2 bucket create <name>   → name must match solobase.toml
+#   3. wrangler r2 bucket create <name>   → name must match impresspress.toml
 #   4. cp .env.example .env, fill in:
 #        CLOUDFLARE_ACCOUNT_ID
 #        CLOUDFLARE_API_TOKEN
-#        SOLOBASE_CLOUDFLARE_D1_DATABASE_ID
-#   5. solobase binary on PATH, OR env $SOLOBASE_BIN points at it,
-#      OR a sibling clone of suppers-ai/solobase exists at ../solobase
+#        IMPRESSPRESS_CLOUDFLARE_D1_DATABASE_ID
+#   5. impresspress binary on PATH, OR env $IMPRESSPRESS_BIN points at it,
+#      OR a sibling clone of impresspress/impresspress exists at ../impresspress
 #
 # Usage:
 #   ./scripts/deploy-cloudflare.sh                    # build + deploy
@@ -18,16 +18,16 @@
 #   ./scripts/deploy-cloudflare.sh secret             # set worker secrets (JWT + deploy token)
 #   ./scripts/deploy-cloudflare.sh tail               # stream worker logs
 #
-# Deploy flow: `deploy` shells out to `solobase deploy --target cloudflare`,
+# Deploy flow: `deploy` shells out to `impresspress deploy --target cloudflare`,
 # which is atomic — it uploads a new worker version without routing traffic
 # to it, POSTs to that version's `/_deploy/init` (authenticated with
-# SOLOBASE_DEPLOY_TOKEN) to run migrations + seeds, and only promotes the
+# IMPRESSPRESS_DEPLOY_TOKEN) to run migrations + seeds, and only promotes the
 # version to 100% traffic if that call succeeds. There's no separate manual
 # seeding step anymore: migrations/seeds run in-worker as part of every
 # deploy, gated on that same call succeeding.
 #
 # First-time setup for a brand-new worker:
-#   1. secret   — push SUPPERS_AI__AUTH__JWT_SECRET + SOLOBASE_DEPLOY_TOKEN
+#   1. secret   — push WAFER_RUN__AUTH__JWT_SECRET + IMPRESSPRESS_DEPLOY_TOKEN
 #                 to the worker secret store (requires a prior `build` so
 #                 wrangler.toml exists)
 #   2. deploy   — runs the atomic flow above
@@ -61,7 +61,7 @@ set +a
 echo "using env: $ENV_FILE"
 
 # ── Validate required env ────────────────────────────────────────────
-need=(CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN SOLOBASE_CLOUDFLARE_D1_DATABASE_ID)
+need=(CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN IMPRESSPRESS_CLOUDFLARE_D1_DATABASE_ID)
 for var in "${need[@]}"; do
   val=${!var:-}
   if [[ -z "$val" || "$val" == "REPLACE_ME" ]]; then
@@ -70,44 +70,44 @@ for var in "${need[@]}"; do
   fi
 done
 
-# ── Locate solobase binary ───────────────────────────────────────────
-if [[ -n "${SOLOBASE_BIN:-}" && -x "$SOLOBASE_BIN" ]]; then
+# ── Locate impresspress binary ───────────────────────────────────────────
+if [[ -n "${IMPRESSPRESS_BIN:-}" && -x "$IMPRESSPRESS_BIN" ]]; then
   :  # honored as-is
-elif command -v solobase >/dev/null 2>&1; then
-  SOLOBASE_BIN=$(command -v solobase)
-elif [[ -x ../solobase/target/release/solobase ]]; then
-  SOLOBASE_BIN=$(readlink -f ../solobase/target/release/solobase)
-elif [[ -d ../solobase ]]; then
-  echo "building solobase from ../solobase (one-time, ~1 min)…"
-  (cd ../solobase && cargo build -p solobase --release --quiet)
-  SOLOBASE_BIN=$(readlink -f ../solobase/target/release/solobase)
+elif command -v impresspress >/dev/null 2>&1; then
+  IMPRESSPRESS_BIN=$(command -v impresspress)
+elif [[ -x ../impresspress/target/release/impresspress ]]; then
+  IMPRESSPRESS_BIN=$(readlink -f ../impresspress/target/release/impresspress)
+elif [[ -d ../impresspress ]]; then
+  echo "building impresspress from ../impresspress (one-time, ~1 min)…"
+  (cd ../impresspress && cargo build -p impresspress --release --quiet)
+  IMPRESSPRESS_BIN=$(readlink -f ../impresspress/target/release/impresspress)
 else
-  echo "error: solobase binary not found. Set \$SOLOBASE_BIN, install via" >&2
-  echo "       cargo install (from ../solobase), or place a sibling clone." >&2
+  echo "error: impresspress binary not found. Set \$IMPRESSPRESS_BIN, install via" >&2
+  echo "       cargo install (from ../impresspress), or place a sibling clone." >&2
   exit 1
 fi
-echo "using solobase: $SOLOBASE_BIN"
+echo "using impresspress: $IMPRESSPRESS_BIN"
 
-WRANGLER_TOML="$SITE_ROOT/target/solobase-cloudflare/wrangler.toml"
+WRANGLER_TOML="$SITE_ROOT/target/impresspress-cloudflare/wrangler.toml"
 
 cmd=${1:-deploy}
 case "$cmd" in
   build)
-    "$SOLOBASE_BIN" build --target cloudflare
+    "$IMPRESSPRESS_BIN" build --target cloudflare
     ;;
 
   deploy)
     # Fail fast, before the (multi-minute) wasm build, if the deploy token
-    # isn't in the environment. `solobase deploy` itself also refuses to
+    # isn't in the environment. `impresspress deploy` itself also refuses to
     # run without it, but checking here avoids burning a build first.
-    if [[ -z "${SOLOBASE_DEPLOY_TOKEN:-}" ]]; then
-      echo "error: SOLOBASE_DEPLOY_TOKEN not in $ENV_FILE (or exported)." >&2
+    if [[ -z "${IMPRESSPRESS_DEPLOY_TOKEN:-}" ]]; then
+      echo "error: IMPRESSPRESS_DEPLOY_TOKEN not in $ENV_FILE (or exported)." >&2
       echo "       Run './scripts/deploy-cloudflare.sh secret' to provision it," >&2
       echo "       then export the same value before re-running deploy." >&2
       exit 1
     fi
 
-    "$SOLOBASE_BIN" deploy --target cloudflare
+    "$IMPRESSPRESS_BIN" deploy --target cloudflare
 
     # Post-deploy health gate. `/_health` (wafer-site/health block) walks
     # every registered block's `ConfigVar` declarations and 503s if any
@@ -140,24 +140,24 @@ case "$cmd" in
       echo "error: wrangler.toml not found — run 'build' first" >&2
       exit 1
     fi
-    if [[ -z "${SUPPERS_AI__AUTH__JWT_SECRET:-}" ]]; then
-      echo "error: SUPPERS_AI__AUTH__JWT_SECRET not in $ENV_FILE" >&2
+    if [[ -z "${WAFER_RUN__AUTH__JWT_SECRET:-}" ]]; then
+      echo "error: WAFER_RUN__AUTH__JWT_SECRET not in $ENV_FILE" >&2
       exit 1
     fi
-    printf '%s' "$SUPPERS_AI__AUTH__JWT_SECRET" \
-      | wrangler secret put SUPPERS_AI__AUTH__JWT_SECRET --config "$WRANGLER_TOML"
+    printf '%s' "$WAFER_RUN__AUTH__JWT_SECRET" \
+      | wrangler secret put WAFER_RUN__AUTH__JWT_SECRET --config "$WRANGLER_TOML"
 
-    if [[ -z "${SOLOBASE_DEPLOY_TOKEN:-}" ]]; then
-      echo "error: SOLOBASE_DEPLOY_TOKEN not in $ENV_FILE" >&2
+    if [[ -z "${IMPRESSPRESS_DEPLOY_TOKEN:-}" ]]; then
+      echo "error: IMPRESSPRESS_DEPLOY_TOKEN not in $ENV_FILE" >&2
       exit 1
     fi
     # Deploy-init auth token: the worker's `/_deploy/init` endpoint (hit by
-    # `solobase deploy` pre-promote, to run migrations + seeds) compares the
+    # `impresspress deploy` pre-promote, to run migrations + seeds) compares the
     # `x-deploy-token` header against this same secret. The same value must
-    # also be exported as SOLOBASE_DEPLOY_TOKEN in the shell that runs
+    # also be exported as IMPRESSPRESS_DEPLOY_TOKEN in the shell that runs
     # `deploy`, so the CLI can send it.
-    printf '%s' "$SOLOBASE_DEPLOY_TOKEN" \
-      | wrangler secret put SOLOBASE_DEPLOY_TOKEN --config "$WRANGLER_TOML"
+    printf '%s' "$IMPRESSPRESS_DEPLOY_TOKEN" \
+      | wrangler secret put IMPRESSPRESS_DEPLOY_TOKEN --config "$WRANGLER_TOML"
     ;;
 
   tail)

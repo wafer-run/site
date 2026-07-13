@@ -13,7 +13,7 @@
 //!   at the server's base URL. Used by the HTTP-level tests.
 //!
 //! Task 13 extends the harness to wire a `wafer-run/storage` block
-//! (LocalStorageService on a tempdir) and a minimal `suppers-ai/auth` stub
+//! (LocalStorageService on a tempdir) and a minimal `wafer-run/auth` stub
 //! that answers `auth.require_user` / `auth.user_profile` from a
 //! statically-seeded user row. That stub is what lets the publish admin
 //! gate work without dragging the full auth block into the test graph.
@@ -54,7 +54,7 @@ use wafer_site::blocks::registry::{self, handlers::RegistryBlock, RegistryConfig
 ///   collections.
 /// - `wafer-run/storage` — LocalStorageService on a tempdir, so `put` /
 ///   `delete` / `get` actually persist something we can verify.
-/// - `suppers-ai/auth` — a minimal stub that resolves seeded
+/// - `wafer-run/auth` — a minimal stub that resolves seeded
 ///   `(user_id -> email)` mappings for `auth.user_profile`. Empty when
 ///   unseeded, in which case `require_admin` treats the user as non-admin.
 #[derive(Clone)]
@@ -81,7 +81,7 @@ impl InMemoryCtx {
     }
 
     /// Construct with a `user_id -> email` identity map. The stub
-    /// `suppers-ai/auth` block uses it to answer `auth.user_profile`
+    /// `wafer-run/auth` block uses it to answer `auth.user_profile`
     /// lookups; `auth.require_user` always errors (tests exercise PAT
     /// auth, which runs earlier in `require_user`).
     pub fn new_with_identities(identities: HashMap<String, String>) -> Self {
@@ -121,7 +121,7 @@ impl Context for InMemoryCtx {
         match block_name {
             "wafer-run/database" => self.db_block.handle(self, msg, input).await,
             "wafer-run/storage" => self.storage_block.handle(self, msg, input).await,
-            "suppers-ai/auth" => self.handle_auth_stub(msg, input).await,
+            "wafer-run/auth" => self.handle_auth_stub(msg, input).await,
             _ => OutputStream::error(WaferError::new(
                 wafer_run::ErrorCode::NotFound,
                 format!("block '{block_name}' not registered in test ctx"),
@@ -141,7 +141,7 @@ impl Context for InMemoryCtx {
     // resource-access enforcement") since wafer-run SP-A; this fixture
     // routes to real Database/Storage blocks, so migrations' DDL would be
     // denied without an explicit permissive override. Mirrors
-    // solobase-core's `MigrationTestCtx` (tests/auth/common.rs).
+    // impresspress-core's `MigrationTestCtx` (tests/auth/common.rs).
     fn check_resource_access(
         &self,
         _resource: &str,
@@ -158,7 +158,7 @@ impl Context for InMemoryCtx {
 }
 
 impl InMemoryCtx {
-    /// Minimal `suppers-ai/auth` stub.
+    /// Minimal `wafer-run/auth` stub.
     ///
     /// - `auth.require_user` — honors the session-cookie convention
     ///   `Cookie: session=<user_id>`. When the incoming `http.header.cookie`
@@ -227,7 +227,7 @@ impl InMemoryCtx {
                 // Fall back to HTTP-style dispatch: registry::auth::fetch_email
                 // makes a retrieve against `/b/auth/api/me` as a WRAP-safe
                 // way to get the profile without the service-op interface.
-                // The real solobase block serves this endpoint; mirror the
+                // The real impresspress block serves this endpoint; mirror the
                 // minimum shape here.
                 let path = msg.path().to_string();
                 let req_action = msg.header("req.action");
@@ -236,9 +236,9 @@ impl InMemoryCtx {
                     let cookie = msg.header("cookie");
                     if let Some(user_id) = parse_session_cookie(cookie) {
                         if let Some(email) = self.identities.get(&user_id) {
-                            // Flat {id, email, ...} shape — matches solobase's
+                            // Flat {id, email, ...} shape — matches impresspress's
                             // real /b/auth/api/me response (see
-                            // crates/solobase-core/src/blocks/auth/handlers/me.rs).
+                            // crates/impresspress-core/src/blocks/auth/handlers/me.rs).
                             let body = serde_json::to_vec(&json!({
                                 "id": user_id,
                                 "email": email,
@@ -257,7 +257,7 @@ impl InMemoryCtx {
                 }
                 OutputStream::error(WaferError::new(
                     wafer_run::ErrorCode::NotFound,
-                    format!("suppers-ai/auth stub: unhandled action {action}"),
+                    format!("wafer-run/auth stub: unhandled action {action}"),
                 ))
             }
         }
@@ -283,15 +283,15 @@ fn parse_session_cookie(raw: &str) -> Option<String> {
     None
 }
 
-/// Apply the admin block's migrations so `suppers_ai__admin__block_settings`
+/// Apply the admin block's migrations so `impresspress__admin__block_settings`
 /// exists before the registry block's `Init` runs `apply_if_blessed`, which
 /// upserts the registry's migration-state row into that table. Mirrors the
 /// production boot ordering (the admin block is registered/initialized first,
-/// creating the tracking table) and solobase-core's `TestContext::with_admin`
+/// creating the tracking table) and impresspress-core's `TestContext::with_admin`
 /// fixture. Without this, `apply_if_blessed`'s `write_state` fails the
 /// `block_settings create` INSERT against a non-existent table.
 async fn apply_admin_migrations(ctx: &InMemoryCtx) {
-    solobase_core::blocks::admin::migrations::apply(ctx)
+    impresspress_core::blocks::admin::migrations::apply(ctx)
         .await
         .expect("apply admin migrations in site test fixture");
 }
@@ -502,13 +502,13 @@ pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
 ///
 /// Unlike [`start_test_site_with_admin`], this variant doesn't mint a PAT
 /// — the cookie is the credential, so `registry::auth::require_user`
-/// routes through the `suppers-ai/auth` session branch rather than the
+/// routes through the `wafer-run/auth` session branch rather than the
 /// PAT-lookup shortcut. That's the branch the admin actually hits in
 /// production when they open `/registry/cli-login` in a browser.
 pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
     // Mint a signed JWT that `registry::auth::require_user` will verify
     // against the configured jwt_secret ("test-secret" in the test harness;
-    // see the `TEST_JWT_SECRET` const below). Shape matches what solobase
+    // see the `TEST_JWT_SECRET` const below). Shape matches what impresspress
     // puts on `auth_token` after OAuth — {sub, email, type:"access", exp}.
     let admin_id = "admin-user-id".to_string();
     let mut identities = HashMap::new();
@@ -532,12 +532,12 @@ pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
 /// Shared JWT secret the test harness configures on `RegistryConfig`.
 pub const TEST_JWT_SECRET: &str = "test-secret";
 
-/// Mint a JWT of the same shape solobase's auth block issues on OAuth
+/// Mint a JWT of the same shape impresspress's auth block issues on OAuth
 /// callback — signed with the block-derived key so `require_user`'s
 /// primary verification path succeeds.
 ///
-/// Solobase mints session tokens via `crypto::sign` in the
-/// `suppers-ai/auth-ui` block context, so the signing key is
+/// Impresspress mints session tokens via `crypto::sign` in the
+/// `impresspress/auth-ui` block context, so the signing key is
 /// `HKDF(master_secret, AUTH_UI_BLOCK_ID)`. The verifier
 /// (`registry::auth::verify_jwt`) derives the same key, so the test must mint
 /// with `AUTH_UI_BLOCK_ID` to exercise the primary (derived-key) path.
@@ -550,7 +550,7 @@ pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
     claims.insert("type".to_string(), json!("access"));
     let key = derive_block_key(
         TEST_JWT_SECRET.as_bytes(),
-        solobase_core::blocks::auth_ui::AUTH_UI_BLOCK_ID,
+        impresspress_core::blocks::auth_ui::AUTH_UI_BLOCK_ID,
     );
     jwt_sign(claims, Duration::from_secs(3600), key.as_bytes()).expect("jwt_sign in test")
 }

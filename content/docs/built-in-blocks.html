@@ -91,10 +91,10 @@ ACTIVE: built-in-blocks
 <h3>wafer-run/monitoring</h3>
 <p>Tracks request metrics: total count, error count, status code distribution, and path frequency. Exposes a stats endpoint at <code>/_stats</code> or <code>/_monitoring</code> that returns JSON with uptime and request data.</p>
 
-<h3>suppers-ai/auth</h3>
+<h3>wafer-run/auth</h3>
 <p>Authentication and role-based access control, absorbing what used to be the
 separate <code>wafer-run/auth-validator</code> and <code>wafer-run/iam-guard</code>
-blocks. Lives in the <code>solobase-core</code> crate and is reached through
+blocks. Lives in the <code>impresspress-core</code> crate and is reached through
 <code>wafer_core::interfaces::auth::AuthService</code>. Supports JWT Bearer
 tokens, <code>sb_</code>-prefixed API keys, and httpOnly session cookies; sets
 <code>auth.user_id</code>, <code>auth.user_email</code>, and
@@ -123,7 +123,7 @@ protected handlers.</p>
         "next": [{
             "block": "wafer-run/cors",
             "next": [{
-                "block": "suppers-ai/auth",
+                "block": "wafer-run/auth",
                 "next": [{
                     "block": "my-handler"
                 }]

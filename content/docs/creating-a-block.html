@@ -164,10 +164,10 @@ export default block({
 wafer test    # run tests/ fixtures against the block</code></pre>
 
 <h3>4. Place in blocks/ for Auto-Discovery</h3>
-<p>Solobase scans <code>blocks/**/target/block.wasm</code> on startup. Copy or build your block inside the <code>blocks/</code> directory and restart Solobase:</p>
-<pre><code>cp -r myorg-greet /path/to/solobase/blocks/
+<p>Impresspress scans <code>blocks/**/target/block.wasm</code> on startup. Copy or build your block inside the <code>blocks/</code> directory and restart Impresspress:</p>
+<pre><code>cp -r myorg-greet /path/to/impresspress/blocks/
 # or build in place
-cd /path/to/solobase/blocks/myorg-greet &amp;&amp; wafer build</code></pre>
+cd /path/to/impresspress/blocks/myorg-greet &amp;&amp; wafer build</code></pre>
 <p>See <a href="/docs/wasm-blocks">WASM Blocks</a> for the full manifest.json format and auto-discovery details.</p>
 
 <h2>Native Rust Blocks</h2>
