@@ -1,17 +1,17 @@
 //! `wafer-site-main` flow definition + route table.
 //!
-//! Middleware chain mirrors solobase's `site-main`; only the router target
+//! Middleware chain mirrors impresspress's `site-main`; only the router target
 //! table differs. The flow is served by `register_http_listener(...,
 //! "wafer-site-main")` in [`crate::run`].
 
 /// Flow JSON registered via `wafer.add_flow_json`. Identical middleware
-/// pipeline to solobase's `site-main` — we just own the ID so the HTTP
+/// pipeline to impresspress's `site-main` — we just own the ID so the HTTP
 /// listener targets the right set of routes.
 pub const JSON: &str = r#"{
     "id": "wafer-site-main",
     "name": "WAFER Site Main",
     "version": "0.1.0",
-    "description": "Top-level HTTP dispatch for wafer-site — site content + solobase router",
+    "description": "Top-level HTTP dispatch for wafer-site — site content + impresspress router",
     "steps": [
         { "id": "security-headers", "block": "wafer-run/security-headers" },
         { "id": "cors",             "block": "wafer-run/cors" },
@@ -28,7 +28,7 @@ pub const JSON: &str = r#"{
 /// routes are listed before the catch-all.
 pub fn routes() -> serde_json::Value {
     serde_json::json!([
-        // Runtime debugger. Registered by `SolobaseBuilder` under
+        // Runtime debugger. Registered by `ImpresspressBuilder` under
         // `wafer-run/inspector`.
         { "path": "/_inspector/**", "block": "wafer-run/inspector" },
         { "path": "/_inspector",    "block": "wafer-run/inspector" },
@@ -44,12 +44,12 @@ pub fn routes() -> serde_json::Value {
         // rollback on this status code.
         { "path": "/_health", "block": "wafer-site/health" },
 
-        // Solobase-owned routes: auth (`/b/auth/*`), admin, health, etc.
-        // `suppers-ai/router` is registered by `SolobaseBuilder`.
-        { "path": "/b/**",                   "block": "suppers-ai/router" },
-        { "path": "/health",                 "block": "suppers-ai/router" },
-        { "path": "/openapi.json",           "block": "suppers-ai/router" },
-        { "path": "/.well-known/agent.json", "block": "suppers-ai/router" },
+        // Impresspress-owned routes: auth (`/b/auth/*`), admin, health, etc.
+        // `impresspress/router` is registered by `ImpresspressBuilder`.
+        { "path": "/b/**",                   "block": "impresspress/router" },
+        { "path": "/health",                 "block": "impresspress/router" },
+        { "path": "/openapi.json",           "block": "impresspress/router" },
+        { "path": "/.well-known/agent.json", "block": "impresspress/router" },
 
         // Landing page + docs + playground + everything else served from
         // `$CARGO_MANIFEST_DIR/dist`.

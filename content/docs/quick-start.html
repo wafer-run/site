@@ -140,15 +140,15 @@ export default block({
 <p>Test fixtures from the <code>tests/</code> directory are run against the compiled block. Each fixture is a JSON file with <code>input</code> and <code>expected</code> fields.</p>
 
 <h3>6. Place in blocks/ Directory</h3>
-<p>Solobase auto-discovers WASM blocks by scanning <code>blocks/**/target/block.wasm</code> on startup. Copy or symlink your project into the <code>blocks/</code> directory:</p>
-<pre><code># from your Solobase project root
+<p>Impresspress auto-discovers WASM blocks by scanning <code>blocks/**/target/block.wasm</code> on startup. Copy or symlink your project into the <code>blocks/</code> directory:</p>
+<pre><code># from your Impresspress project root
 cp -r ../myorg-hello blocks/myorg-hello
 # or build in place
 cd blocks/myorg-hello &amp;&amp; wafer build</code></pre>
 
-<h3>7. Run Solobase</h3>
-<p>Start Solobase — it will auto-discover and load your block:</p>
-<pre><code>cargo run   # or ./solobase</code></pre>
+<h3>7. Run Impresspress</h3>
+<p>Start Impresspress — it will auto-discover and load your block:</p>
+<pre><code>cargo run   # or ./impresspress</code></pre>
 <pre><code>[INFO] Discovered block: myorg/hello (blocks/myorg-hello/target/block.wasm)
 [INFO] Registered 1 WASM block(s)</code></pre>
 

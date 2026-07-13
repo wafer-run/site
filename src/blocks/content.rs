@@ -2,14 +2,14 @@
 //! page, playground HTML) from a [`StorageService`] passed in at register
 //! time. Native consumers wire a [`LocalStorageService`] rooted at
 //! `<repo>/dist/` (folder = `""`); cloudflare consumers wire the R2-backed
-//! `StorageService` from `solobase-cloudflare` (folder = `"dist"` since
-//! `solobase deploy --target cloudflare` uploads `dist/**` under that
+//! `StorageService` from `impresspress-cloudflare` (folder = `"dist"` since
+//! `impresspress deploy --target cloudflare` uploads `dist/**` under that
 //! prefix in the R2 bucket).
 //!
 //! ## Why not `wafer-run/web`?
 //!
 //! `wafer-run/web` dispatches reads through the `wafer-run/storage` alias,
-//! which `SolobaseBuilder` replaces with `SolobaseStorageBlock`. That
+//! which `ImpresspressBuilder` replaces with `ImpresspressStorageBlock`. That
 //! wrapper namespaces every folder under the calling block's name
 //! (`wafer-site/content/<folder>/<key>`), so the deploy's R2 keys
 //! (`dist/<key>`) wouldn't resolve. This block holds a direct

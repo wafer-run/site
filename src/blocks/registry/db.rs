@@ -35,7 +35,7 @@ pub const TOKENS: &str = "wafer_run__registry__tokens";
 /// Reserved org names seeded into `registry_orgs` on block init. Owned by the
 /// project: external users cannot claim these names. Kept in alphabetical
 /// order to match the test assertion.
-pub const RESERVED_ORGS: &[&str] = &["solobase", "suppers-ai", "wafer", "wafer-run"];
+pub const RESERVED_ORGS: &[&str] = &["impresspress", "wafer", "wafer-run"];
 
 // ---- Init / seed -----------------------------------------------------------
 

@@ -30,8 +30,7 @@ async fn init_creates_tables_and_seeds_reserved_orgs() {
     assert_eq!(
         names,
         vec![
-            "solobase".to_string(),
-            "suppers-ai".to_string(),
+            "impresspress".to_string(),
             "wafer".to_string(),
             "wafer-run".to_string(),
         ],
@@ -46,7 +45,7 @@ async fn init_creates_tables_and_seeds_reserved_orgs() {
         .await
         .expect("count orgs");
     assert_eq!(
-        count_after, 4,
+        count_after, 3,
         "seed must be idempotent — re-running must not add rows"
     );
 }

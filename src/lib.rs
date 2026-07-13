@@ -11,7 +11,7 @@
 //!   on-disk SQLite + LocalStorage. This is the canonical dev/test path.
 //! - `target-cloudflare`: cdylib for `wasm32-unknown-unknown` consumed by
 //!   `worker-build`. The cloudflare entry (`fetch_main`) routes requests
-//!   through `solobase_cloudflare::run` with this crate's
+//!   through `impresspress_cloudflare::run` with this crate's
 //!   [`register_blocks_for_site`] / [`register_post_build_for_site`] hooks.
 //!   The post-build hook receives a [`StorageService`] (LocalStorage on
 //!   native, R2 on cloudflare) which [`blocks::content`] uses to serve
@@ -24,15 +24,15 @@ pub mod flows;
 use std::{collections::HashMap, sync::Arc};
 
 #[cfg(feature = "target-native")]
-use solobase_core::builder;
-use solobase_core::builder::SolobaseBuilder;
-use solobase_core::features::BlockSettings;
+use impresspress_core::builder;
+use impresspress_core::builder::ImpresspressBuilder;
+use impresspress_core::features::BlockSettings;
 #[cfg(feature = "target-native")]
 use wafer_block_local_storage::service::LocalStorageService;
 use wafer_core::interfaces::storage::service::StorageService;
 
 #[cfg(feature = "target-native")]
-use solobase_native::{
+use impresspress_native::{
     init_tracing, load_dotenv, register_http_listener, register_observability_hooks,
     serve_until_shutdown, InfraConfig,
 };
@@ -41,17 +41,17 @@ use solobase_native::{
 // Shared registration helpers — used by both the native `run()` below and
 // the cloudflare `fetch_main` worker entry. They're kept free-functions
 // rather than methods on a struct so they can be passed by name to
-// `solobase_cloudflare::run`'s `FnOnce` parameters.
+// `impresspress_cloudflare::run`'s `FnOnce` parameters.
 // ---------------------------------------------------------------------------
 
-/// Pre-build hook: applies site-specific [`SolobaseBuilder`] configuration.
+/// Pre-build hook: applies site-specific [`ImpresspressBuilder`] configuration.
 ///
 /// Currently just wires [`block_settings_for_site`]. Kept as its own
 /// function for symmetry with [`register_post_build_for_site`] and so the
 /// cloudflare worker entry can pass it as a closure argument.
 pub fn register_blocks_for_site(
-    builder: SolobaseBuilder,
-) -> Result<SolobaseBuilder, Box<dyn std::error::Error>> {
+    builder: ImpresspressBuilder,
+) -> Result<ImpresspressBuilder, Box<dyn std::error::Error>> {
     Ok(builder.block_settings(block_settings_for_site()))
 }
 
@@ -61,7 +61,7 @@ pub fn register_blocks_for_site(
 /// `content_storage` is the [`StorageService`] the site content block
 /// reads its assets from. Native passes a [`LocalStorageService`] rooted
 /// at `<repo>/dist` (folder=""); cloudflare passes the R2-backed service
-/// from `solobase-cloudflare` (folder="dist", since `solobase deploy
+/// from `impresspress-cloudflare` (folder="dist", since `impresspress deploy
 /// --target cloudflare` uploads `dist/**` under that prefix in R2). Both
 /// targets serve the SPA chrome from `/` uniformly.
 ///
@@ -69,12 +69,12 @@ pub fn register_blocks_for_site(
 ///
 /// The registry block reads its config from env vars. On native those come
 /// from `.env` via `dotenv`; on cloudflare they come from D1's `variables`
-/// table merged into the worker `env` by `solobase_cloudflare::run`'s
+/// table merged into the worker `env` by `impresspress_cloudflare::run`'s
 /// protected-key loader. Missing values soft-default to empty strings here
 /// rather than panicking, so wasm32 builds of the worker don't trip
 /// `expect()` at startup. The registry block surfaces a clear error at
 /// request time if its config is empty/wrong, which matches the failure
-/// mode for any other missing solobase config.
+/// mode for any other missing impresspress config.
 pub fn register_post_build_for_site(
     wafer: &mut wafer_run::Wafer,
     content_storage: Arc<dyn StorageService>,
@@ -90,8 +90,8 @@ pub fn register_post_build_for_site(
     crate::blocks::content::register(wafer, content_storage, content_folder)
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
-    // `SolobaseBuilder` configures `wafer-run/inspector` with
-    // `allow_anonymous: false` because solobase runs behind auth. The site
+    // `ImpresspressBuilder` configures `wafer-run/inspector` with
+    // `allow_anonymous: false` because impresspress runs behind auth. The site
     // exposes the inspector publicly, so override here.
     wafer.add_block_config(
         "wafer-run/inspector",
@@ -119,7 +119,7 @@ pub fn register_post_build_for_site(
     );
 
     // 4b. Registry block. See doc comment above re: soft-default behaviour.
-    let jwt_secret = std::env::var(solobase_core::blocks::auth::JWT_SECRET_KEY).unwrap_or_default();
+    let jwt_secret = std::env::var(impresspress_core::blocks::auth::JWT_SECRET_KEY).unwrap_or_default();
     let registry_cfg = crate::blocks::registry::RegistryConfig {
         jwt_secret,
         admin_email: std::env::var("WAFER_RUN__REGISTRY__ADMIN_EMAIL").unwrap_or_default(),
@@ -137,37 +137,37 @@ pub fn register_post_build_for_site(
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
     // 5. Site flow + router routes. Must run *after* `build()` so our
-    //    `wafer-run/router` config overwrites solobase's default.
+    //    `wafer-run/router` config overwrites impresspress's default.
     crate::flows::register_site_main(wafer)
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
     Ok(())
 }
 
-/// Hide solobase feature blocks the site doesn't surface.
+/// Hide impresspress feature blocks the site doesn't surface.
 ///
-/// `BlockSettings` is consumed by `SolobaseRouterBlock`: when a block is
+/// `BlockSettings` is consumed by `ImpresspressRouterBlock`: when a block is
 /// disabled here, requests to `/b/{block}/**` 404 instead of dispatching.
-/// The blocks are still registered statically (every solobase feature
+/// The blocks are still registered statically (every impresspress feature
 /// block self-registers via `register_static_block!`) and their required
 /// config is still validated at start, so this is purely a routing/UX
 /// concern — not a way to suppress missing-config errors.
 ///
-/// `BlockSettings` stores the *full* block name (e.g. `suppers-ai/llm`)
+/// `BlockSettings` stores the *full* block name (e.g. `impresspress/llm`)
 /// and defaults to enabled. Explicitly set the features we don't want to
 /// `false`.
 fn block_settings_for_site() -> BlockSettings {
     let mut enabled = HashMap::new();
     for name in [
-        "suppers-ai/legalpages",
-        "suppers-ai/llm",
-        "suppers-ai/projects",
-        "suppers-ai/products",
-        "suppers-ai/files",
-        "suppers-ai/messages",
-        "suppers-ai/userportal",
-        "suppers-ai/vector",
-        "suppers-ai/fastembed",
+        "impresspress/legalpages",
+        "impresspress/llm",
+        "impresspress/projects",
+        "impresspress/products",
+        "impresspress/files",
+        "impresspress/messages",
+        "impresspress/userportal",
+        "impresspress/vector",
+        "impresspress/fastembed",
     ] {
         enabled.insert(name.to_string(), false);
     }
@@ -175,7 +175,7 @@ fn block_settings_for_site() -> BlockSettings {
 }
 
 // ---------------------------------------------------------------------------
-// Native target — `solobase serve --target native` / `cargo run`.
+// Native target — `impresspress serve --target native` / `cargo run`.
 // ---------------------------------------------------------------------------
 
 /// Run the site (native target).
@@ -183,8 +183,8 @@ fn block_settings_for_site() -> BlockSettings {
 /// Composition order:
 ///
 /// 1. Load `.env`, init tracing.
-/// 2. Read `SOLOBASE_*` infra config via [`InfraConfig::from_env`].
-/// 3. Build the WAFER runtime via [`SolobaseBuilder`] + the shared
+/// 2. Read `IMPRESSPRESS_*` infra config via [`InfraConfig::from_env`].
+/// 3. Build the WAFER runtime via [`ImpresspressBuilder`] + the shared
 ///    [`register_blocks_for_site`] pre-build hook.
 /// 4. Call the shared [`register_post_build_for_site`] hook (registers
 ///    site content, registry, inspector + security-headers overrides,
@@ -196,14 +196,14 @@ pub async fn run() -> anyhow::Result<()> {
     use anyhow::Context as _;
 
     // 1. Load `.env` + tracing. Anchor `.env` lookup to the current dir
-    //    so `cargo run` from the repo root picks it up; solobase-cli does
+    //    so `cargo run` from the repo root picks it up; impresspress-cli does
     //    the same with its `repo_root`.
     load_dotenv(std::path::Path::new("."));
-    let log_format = std::env::var("SOLOBASE_LOG_FORMAT").unwrap_or_else(|_| "text".into());
+    let log_format = std::env::var("IMPRESSPRESS_LOG_FORMAT").unwrap_or_else(|_| "text".into());
     init_tracing(&log_format).context("initialize tracing subscriber")?;
-    tracing::info!("wafer-site starting (solobase + WAFER runtime)");
+    tracing::info!("wafer-site starting (impresspress + WAFER runtime)");
 
-    // 2. Infrastructure config (SOLOBASE_*).
+    // 2. Infrastructure config (IMPRESSPRESS_*).
     let infra = InfraConfig::from_env();
     tracing::info!(
         listen = %infra.listen,
@@ -222,36 +222,36 @@ pub async fn run() -> anyhow::Result<()> {
     std::fs::create_dir_all(&infra.storage_root)?;
 
     // 3. Build the WAFER runtime via the shared pre-build hook.
-    let db = solobase_native::make_sqlite_database_service(&infra.db_path)
+    let db = impresspress_native::make_sqlite_database_service(&infra.db_path)
         .context("create sqlite database service")?;
-    let storage = solobase_native::make_local_storage_service(&infra.storage_root)
+    let storage = impresspress_native::make_local_storage_service(&infra.storage_root)
         .context("create local storage service")?;
-    let jwt_secret = std::env::var(solobase_core::blocks::auth::JWT_SECRET_KEY)
-        .expect("SUPPERS_AI__AUTH__JWT_SECRET required");
-    let crypto = solobase_native::make_jwt_crypto_service(jwt_secret)
+    let jwt_secret = std::env::var(impresspress_core::blocks::auth::JWT_SECRET_KEY)
+        .expect("WAFER_RUN__AUTH__JWT_SECRET required");
+    let crypto = impresspress_native::make_jwt_crypto_service(jwt_secret)
         .context("create jwt crypto service")?;
-    let builder = SolobaseBuilder::new()
+    let builder = ImpresspressBuilder::new()
         .database(db)
         .storage(storage)
         .config(Arc::new(
             wafer_core::service_blocks::config::EnvConfigService::new(),
         ))
         .crypto(crypto)
-        .network(solobase_native::make_fetch_network_service())
-        .logger(solobase_native::make_tracing_logger())
+        .network(impresspress_native::make_fetch_network_service())
+        .logger(impresspress_native::make_tracing_logger())
         .config_source(Arc::new(
-            solobase_core::config_source::EnvConfigSource::new(),
+            impresspress_core::config_source::EnvConfigSource::new(),
         ))
         .sqlite_db_path(&infra.db_path);
     let builder = register_blocks_for_site(builder)
         .map_err(|e| anyhow::anyhow!("register_blocks_for_site: {e}"))?;
     let (mut wafer, storage_block) = builder
         .build()
-        .map_err(|e| anyhow::anyhow!("failed to build solobase runtime: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to build impresspress runtime: {e}"))?;
 
     // 4-5. Shared post-build hooks. The content block reads from a
     //     LocalStorage rooted at <repo>/dist; this is separate from
-    //     solobase's main storage (rooted at infra.storage_root) so the
+    //     impresspress's main storage (rooted at infra.storage_root) so the
     //     two key namespaces don't collide.
     let content_storage: Arc<dyn StorageService> = {
         let dist_root = format!("{}/dist", env!("CARGO_MANIFEST_DIR"));
@@ -269,13 +269,13 @@ pub async fn run() -> anyhow::Result<()> {
 
     // Boot through the shared funnel (seal → init_block(admin) →
     // init_all_blocks → post_start), then run the native-only Start
-    // lifecycle + socket bind — the same sequence as solobase's native
+    // lifecycle + socket bind — the same sequence as impresspress's native
     // server. Admin-first init guarantees admin's migrations create
-    // `suppers_ai__admin__block_settings` before any other block's Init
+    // `impresspress__admin__block_settings` before any other block's Init
     // writes its migration state there; the previous plain `start()` left
     // init order to HashMap iteration and llm/registry could permanent-fail
     // on the missing table on a fresh database. The site seeds its config
-    // from env pre-build (like native solobase), so the seed hook is a no-op.
+    // from env pre-build (like native impresspress), so the seed hook is a no-op.
     struct SiteBootHooks;
 
     #[wafer_block::wafer_async_trait]
@@ -300,13 +300,13 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Cloudflare target — `solobase build --target cloudflare` consumes this
+// Cloudflare target — `impresspress build --target cloudflare` consumes this
 // crate as a `cdylib`, then `worker-build` packages it into a CF Worker.
 // ---------------------------------------------------------------------------
 
 /// Cloudflare Worker `fetch` entrypoint.
 ///
-/// Defers all the heavy lifting to [`solobase_cloudflare::run`], which
+/// Defers all the heavy lifting to [`impresspress_cloudflare::run`], which
 /// loads vars from D1, wires services, and invokes our two registration
 /// hooks before dispatching the request through WAFER.
 #[cfg(feature = "target-cloudflare")]
@@ -316,7 +316,7 @@ async fn fetch_main(
     env: worker::Env,
     ctx: worker::Context,
 ) -> worker::Result<worker::Response> {
-    solobase_cloudflare::run(
+    impresspress_cloudflare::run(
         req,
         env,
         ctx,
@@ -333,5 +333,5 @@ async fn fetch_main(
 #[cfg(feature = "target-cloudflare")]
 #[worker::event(start)]
 fn start() {
-    solobase_cloudflare::init_isolate();
+    impresspress_cloudflare::init_isolate();
 }

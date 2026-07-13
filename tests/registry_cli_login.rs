@@ -5,12 +5,12 @@
 //!
 //! Why direct-to-module rather than HTTP-integration:
 //! `tests/common::start_test_site` wires only the registry block, no
-//! `suppers-ai/auth`. That means `auth::require_admin` can't resolve a
+//! `wafer-run/auth`. That means `auth::require_admin` can't resolve a
 //! session cookie to an admin user — the admin-gated `GET
 //! /registry/cli-login` path returns the coming-soon page even for the
 //! intended admin. HTTP-integration coverage for the full round-trip
 //! belongs in Task 13's end-to-end harness (which must stand up
-//! `suppers-ai/auth` for publish-path reasons anyway). Here we assert the
+//! `wafer-run/auth` for publish-path reasons anyway). Here we assert the
 //! logic the route handlers delegate to; the routes themselves are one-to-
 //! one wrappers around these helpers.
 
