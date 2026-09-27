@@ -18,19 +18,24 @@ ACTIVE: waferflow-spec
     "input":       PortSchema | null,  // optional — schema for $.input
     "output":      PortSchema | null,  // optional — schema for flow output
     "steps":       Step[],         // required — at least one step
-    "config":      FlowConfig | null   // optional
+    "config":      FlowConfig | null,  // optional
+    "blocks":      string[] | null,    // optional — informational list of the blocks the flow uses
+    "config_map":  { [key]: ConfigMapEntry } | null,  // optional — routes flow config keys to block configs
+    "config_defaults": { [block]: object } | null      // optional — config merged into those blocks
 }</code></pre>
+<p>Unknown top-level keys are ignored. <code>blocks</code> is informational: the runtime resolves blocks from the steps. <code>config_map</code> lets a flow expose one flat config surface: each key of the config registered under the flow's id is copied to <code>{ "target": block, "key": key }</code>, i.e. into the target block's config under <code>key</code>. <code>config_defaults</code> (block name &rarr; config object) is merged into those blocks' configs alongside it, and applies only when the flow has a <code>config_map</code> and config is registered under the flow's id.</p>
 
 <h4>Step</h4>
 <p>A single execution unit in the flow.</p>
 <pre><code>{
-    "id":          string,              // required — unique within flow, pattern: [a-zA-Z][a-zA-Z0-9_-]*
+    "id":          string,              // required — unique within the flow, branch steps included; "input" and "each" are reserved
     "block":       string,              // required — block name to execute
-    "input":       object | null,       // optional — input map, values can be expressions
+    "input":       any | null,          // optional — input template, "$."-prefixed strings are expressions
     "next":        NextEntry[] | null,  // optional — conditional routing
     "each":        string | null,       // optional — expression resolving to array
     "parallel":    ParallelBranch[] | null,  // optional — concurrent branches
-    "description": string | null        // optional
+    "description": string | null,       // optional
+    "config":      any | null           // optional — block config for this step only
 }</code></pre>
 <p>Fields are mutually exclusive where it makes sense: a step with <code>each</code> iterates, a step with <code>parallel</code> fans out, and a step with <code>next</code> routes conditionally after execution.</p>
 
@@ -41,12 +46,12 @@ ACTIVE: waferflow-spec
     "step": string | null,  // target step id (exactly one of step/flow required)
     "flow": string | null   // target flow id (exactly one of step/flow required)
 }</code></pre>
-<p>If <code>when</code> is omitted, the entry is the default (fallback) route. If no entry matches and there is no default, execution continues to the next step in the array.</p>
+<p>If <code>when</code> is omitted, the entry is the default (fallback) route. A step with <code>next</code> must include a default entry; a flow without one fails validation. A <code>next</code> entry may only target a top-level step, and a step inside a <code>parallel</code> branch may not have <code>next</code>.</p>
 
 <h4>ParallelBranch</h4>
 <p>A branch in a parallel step. All branches execute concurrently.</p>
 <pre><code>{
-    "steps": Step[]  // required — at least one step per branch
+    "steps": Step[]  // required
 }</code></pre>
 <p>Results from all branches are merged into the accumulator. Each branch's steps write to the same shared accumulator, so step ids must be unique across all branches.</p>
 
@@ -64,27 +69,14 @@ ACTIVE: waferflow-spec
 <h4>FlowConfig</h4>
 <p>Flow-level execution settings.</p>
 <pre><code>{
+    "timeout":    string | null,   // max execution time, e.g. "250ms", "30s", "5m", "2h" (a bare number is seconds)
     "timeout_ms": integer | null,  // max execution time in milliseconds
-    "max_steps":  integer | null,  // max step executions (prevents infinite loops)
-    "on_error":   "stop" | "skip" | "retry"  // default: "stop"
+    "max_steps":  integer | null,  // max step executions, at least 1 (default: 1000)
+    "on_error":   "stop" | "continue"  // default: "stop"
 }</code></pre>
-<ul>
-    <li><code>stop</code> &mdash; abort the flow on any step error</li>
-    <li><code>skip</code> &mdash; skip the failed step and continue to the next</li>
-    <li><code>retry</code> &mdash; retry the failed step (implementation-defined retry policy)</li>
-</ul>
+<p>Set at most one of <code>timeout</code> and <code>timeout_ms</code>; either must be greater than zero and at most 24 hours. Any other key, or any other <code>on_error</code> value, fails to parse. See <a href="#error-handling">Error Handling</a> for <code>on_error</code>.</p>
 
-<h4>BlockDef</h4>
-<p>Block metadata. Defined separately from flows in a <code>block.json</code> file.</p>
-<pre><code>{
-    "id":          string,              // required — e.g. "@wafer-run/wafer-run/sqlite"
-    "name":        string,              // required — human-readable name
-    "version":     string,              // required — semver
-    "description": string | null,       // optional
-    "input":       PortSchema | null,   // optional — input contract
-    "output":      PortSchema | null,   // optional — output contract
-    "runtime":     "wasm" | "native" | "both" | null  // optional
-}</code></pre>
+<p>Block metadata (a block's id, ports and runtime) is not part of a flow document and is not in the flow schema; see <a href="/docs/waferflow-blocks">WaferFlow Blocks</a>.</p>
 
 <h3>Flow Control</h3>
 
@@ -208,16 +200,15 @@ $.input.status not in ["banned", "suspended"]</code></pre>
 </ol>
 <p>Non-expression strings and other JSON values in step inputs are passed through as-is.</p>
 
-<h3>Error Handling</h3>
+<h3 id="error-handling">Error Handling</h3>
 <p>The <code>config.on_error</code> field controls what happens when a step fails:</p>
 <ul>
     <li><code>stop</code> (default) &mdash; the flow aborts immediately and returns the error.</li>
-    <li><code>skip</code> &mdash; the failed step is skipped; its output is not written to the accumulator. Execution continues with the next step.</li>
-    <li><code>retry</code> &mdash; the runtime retries the failed step. The retry policy (count, backoff) is implementation-defined.</li>
+    <li><code>continue</code> &mdash; the failed step's output is recorded as <code>null</code> and execution continues with the next step. Inside an <code>each</code> loop, the failed item's result is <code>null</code> and the loop goes on.</li>
 </ul>
 <p>The <code>max_steps</code> config prevents infinite loops from <code>next</code> routing that cycles back to earlier steps. When the limit is reached, the flow aborts with an error.</p>
 
 <h3>JSON Schema</h3>
 <p>The machine-readable JSON Schema for WaferFlow is available at:</p>
 <pre><code><a href="/schema/waferflow/v0.1.0/flow.schema.json">/schema/waferflow/v0.1.0/flow.schema.json</a></code></pre>
-<p>Use it for editor autocomplete, validation, and tooling integration.</p>
+<p>Use it for editor autocomplete, validation, and tooling integration. It is generated from the runtime's flow types (<code>wafer_flow::json_schema()</code>), so it accepts the documents the runtime parses, with one exception: JSON Schema counts a number such as <code>1000.0</code> as an integer, and the runtime refuses a fraction in <code>timeout_ms</code> or <code>max_steps</code>. The semantic rules above that a JSON Schema cannot state &mdash; unique and unreserved step ids, known <code>next</code> targets, a default <code>next</code> entry, well-formed expressions, not setting both timeouts &mdash; are checked when the flow is loaded.</p>

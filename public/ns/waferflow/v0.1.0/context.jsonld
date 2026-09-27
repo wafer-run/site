@@ -12,6 +12,8 @@
     "NextEntry": "wf:NextEntry",
     "PortSchema": "wf:PortSchema",
     "FlowConfig": "wf:FlowConfig",
+    "ParallelBranch": "wf:ParallelBranch",
+    "ConfigMapEntry": "wf:ConfigMapEntry",
 
     "id": "@id",
     "name": "schema:name",
@@ -64,6 +66,10 @@
     "runtime": {
       "@id": "wf:runtime"
     },
+    "timeout": {
+      "@id": "wf:timeout",
+      "@type": "xsd:string"
+    },
     "timeout_ms": {
       "@id": "wf:timeoutMs",
       "@type": "xsd:integer"
@@ -74,6 +80,26 @@
     },
     "on_error": {
       "@id": "wf:onError"
+    },
+    "blocks": {
+      "@id": "wf:blocks",
+      "@type": "@id",
+      "@container": "@set"
+    },
+    "config_map": {
+      "@id": "wf:configMap"
+    },
+    "config_defaults": {
+      "@id": "wf:configDefaults",
+      "@type": "@json"
+    },
+    "target": {
+      "@id": "wf:targetBlock",
+      "@type": "@id"
+    },
+    "key": {
+      "@id": "wf:configKey",
+      "@type": "xsd:string"
     }
   }
 }

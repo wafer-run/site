@@ -6,76 +6,61 @@ ACTIVE: flow-configuration
 <h2>Flow Configuration</h2>
 
 <h3>Auto-Discovery</h3>
-<p>Impresspress scans <code>flows/**/*.json</code> recursively on startup and loads every file it finds as a flow definition. No explicit registration is required — drop a <code>.json</code> file anywhere under the <code>flows/</code> directory and it will be picked up automatically on the next restart.</p>
+<p>Impresspress scans <code>flows/**/*.json</code> under its working directory on startup and loads every file it finds as a flow definition (in builds with WASM block support). No explicit registration is required — drop a <code>.json</code> file anywhere under <code>flows/</code> and it is picked up on the next restart. A file that does not parse or validate is skipped with a warning naming it.</p>
 <pre><code>flows/
-  api.json          # loaded as flow "api"
-  admin/panel.json  # loaded as flow "admin/panel"
-  v2/api.json       # loaded as flow "v2/api"
+  api.json
+  admin/panel.json
 </code></pre>
-<p>Each file must contain a valid <code>FlowDef</code> object with an <code>id</code> field. The <code>id</code> in the JSON is authoritative — the file path is used only for discovery.</p>
-<p>Flows are defined in JSON using the <code>FlowDef</code> format:</p>
+<p>Each file holds one <a href="/docs/waferflow-spec">WaferFlow</a> document. Its <code>id</code> names the flow — the file path is used only for discovery.</p>
+<p>A flow is an ordered list of <code>steps</code>, each naming a block to run:</p>
 <pre><code>{
     "id": "api",
-    "summary": "API flow",
-    "config": { "on_error": "stop" },
-    "root": {
-        "block": "wafer-run/security-headers",
-        "next": [{
-            "block": "wafer-run/cors",
-            "next": [{
-                "block": "wafer-run/router",
-                "config": {
-                    "routes": [
-                        { "path": "/api/hello", "actions": ["retrieve"], "block": "hello" },
-                        { "path": "/api/users", "actions": ["create"], "block": "create-user" },
-                        { "path": "/api/items/{id}", "block": "items" },
-                        { "path": "/api/files/**", "block": "file-handler" }
-                    ]
-                }
-            }]
-        }]
-    }
+    "name": "API",
+    "version": "0.1.0",
+    "steps": [
+        { "id": "security-headers", "block": "wafer-run/security-headers" },
+        { "id": "cors",             "block": "wafer-run/cors" },
+        {
+            "id": "router",
+            "block": "wafer-run/router",
+            "config": {
+                "routes": [
+                    { "path": "/api/hello", "actions": ["retrieve"], "block": "hello" },
+                    { "path": "/api/users", "actions": ["create"], "block": "create-user" },
+                    { "path": "/api/items/{id}", "block": "items" },
+                    { "path": "/api/files/**", "block": "file-handler" }
+                ]
+            }
+        }
+    ],
+    "config": { "on_error": "stop" }
 }</code></pre>
-<p>For most apps, use <code>wafer-run/http-server</code> which sets up the full infrastructure chain automatically — see <a href="/docs/built-in-blocks">Built-in Blocks</a>. Custom flows let you compose blocks in any order.</p>
+<p>Steps run in order. A step whose block halts (answers and stops the flow), drops the request, or errors under <code>"on_error": "stop"</code> ends the flow; otherwise the next step runs — a middleware block passes the request through, and a responding block's output becomes the body the next step sees. For most apps, use <code>wafer-run/http-server</code>, which sets up the full infrastructure chain automatically — see <a href="/docs/built-in-blocks">Built-in Blocks</a>. Custom flows let you compose blocks in any order.</p>
 
-<h3>Match Patterns</h3>
-<p>Flows also support inline <code>match</code> patterns on nodes for lightweight routing without the router block:</p>
-<pre><code>{
-    "root": {
-        "next": [
-            { "match": "GET:/api/hello", "block": "hello" },
-            { "match": "POST:/api/users", "block": "create-user" }
-        ]
-    }
-}</code></pre>
+<h3>Routing</h3>
+<p>Request routing is the <code>wafer-run/router</code> block's job, configured by its <code>routes</code> list. The first route that matches wins:</p>
 <ul>
-    <li><code>METHOD:/path</code> — match a specific HTTP method and path (e.g. <code>GET:/api/hello</code>)</li>
-    <li><code>*:/path</code> — match any method</li>
-    <li><code>{var}</code> — capture a path parameter (available as <code>req.param.var</code> in meta)</li>
-    <li><code>/**</code> — wildcard suffix, matches any remaining path segments</li>
+    <li><code>path</code> — the path to match; <code>{var}</code> captures a segment (available as <code>req.param.var</code> in meta) and a trailing <code>/**</code> matches any remaining segments</li>
+    <li><code>block</code> — the block the request is dispatched to</li>
+    <li><code>actions</code> (or <code>methods</code>) — optional list of actions or HTTP methods the route accepts; omit it to accept any</li>
 </ul>
+<p>A step's <code>next</code> list routes between steps on <code>when</code> conditions over step outputs — see <a href="/docs/waferflow-spec">the spec</a>.</p>
 
 <h3>Flow Config</h3>
 <p>The top-level <code>config</code> object supports:</p>
 <ul>
-    <li><code>on_error</code> — error policy: <code>"stop"</code> (abort flow) or <code>"continue"</code> (skip failed block)</li>
-    <li><code>timeout</code> — request timeout (e.g. <code>"30s"</code>, <code>"5m"</code>)</li>
+    <li><code>on_error</code> — error policy: <code>"stop"</code> (abort the flow, the default) or <code>"continue"</code> (record the failed step's output as <code>null</code> and go on)</li>
+    <li><code>timeout</code> — flow timeout (e.g. <code>"250ms"</code>, <code>"30s"</code>, <code>"5m"</code>, <code>"2h"</code>; a bare number is seconds), at most 24 hours</li>
+    <li><code>timeout_ms</code> — the same timeout in milliseconds; set at most one of <code>timeout</code> and <code>timeout_ms</code></li>
+    <li><code>max_steps</code> — cap on step executions (default 1000)</li>
 </ul>
+<p>Any other key or <code>on_error</code> value is refused when the flow is loaded. See the <a href="/docs/waferflow-spec">WaferFlow Spec</a> for the full field list.</p>
 
-<h3>Flow Tree Structure</h3>
-<p>Each node in the flow tree has:</p>
-<ul>
-    <li><code>block</code> — the block to execute at this node</li>
-    <li><code>flow</code> — reference to another flow (e.g. <code>"wafer-run/http-server"</code>)</li>
-    <li><code>match</code> — the pattern to match against</li>
-    <li><code>next</code> — an array of child nodes</li>
-    <li><code>config</code> — key-value config passed to the block via <code>ctx.config_get()</code></li>
-</ul>
-
-<h3>Node Config</h3>
-<p>Pass configuration to a block at a specific node:</p>
+<h3>Step Config</h3>
+<p>A step's <code>config</code> object is passed to its block for that step only, over the block's flow- and instance-level config:</p>
 <pre><code>{
-    "block": "wafer-run/auth",
+    "id": "check-role",
+    "block": "acme/role-check",
     "config": { "role": "editor" }
 }</code></pre>
 <p>The block reads these values with <code>ctx.config_get("role")</code>.</p>

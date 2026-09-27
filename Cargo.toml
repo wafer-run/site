@@ -90,6 +90,11 @@ wafer-block-http-listener  = { path = "../wafer-run/crates/wafer-block-http-list
 # registry tests run the block over the production database, storage,
 # config, crypto and auth-ui blocks with WRAP enforced.
 impresspress-core          = { path = "../impresspress/crates/impresspress-core", default-features = false, features = ["test-support"] }
+# The published WaferFlow JSON Schema is generated from wafer-flow's types;
+# tests/flow_schema.rs fails when public/schema/waferflow/ drifts from them.
+wafer-flow                 = { path = "../wafer-run/crates/wafer-flow", features = ["json-schema"] }
+# Validates the docs' flow examples against the published schema file.
+jsonschema                 = { version = "0.58", default-features = false }
 axum = "0.8"
 # The HTTP-level registry tests drive the test server with it.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
