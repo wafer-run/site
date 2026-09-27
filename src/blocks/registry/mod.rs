@@ -16,6 +16,11 @@ use wafer_run::Wafer;
 /// convention — this is the canonical WAFER package registry block.
 pub const NAME: &str = "wafer-run/registry";
 
+/// The path prefix the registry serves: `/registry` and everything under it.
+/// `impresspress/router` dispatches it here (see
+/// [`crate::register_blocks_for_site`]).
+pub const ROUTE_PREFIX: &str = "/registry";
+
 /// Configuration for the registry block.
 ///
 /// Sourced from env vars in [`crate::run`] and passed explicitly rather

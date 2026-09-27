@@ -58,7 +58,12 @@ impl Site {
         let infra = InfraConfig {
             listen: format!("127.0.0.1:{port}"),
             db_type: "sqlite".to_string(),
-            db_path: tmp.path().join("site.sqlite3").to_str().unwrap().to_string(),
+            db_path: tmp
+                .path()
+                .join("site.sqlite3")
+                .to_str()
+                .unwrap()
+                .to_string(),
             db_url: None,
             storage_type: "local".to_string(),
             storage_root: storage_root.to_str().unwrap().to_string(),
@@ -88,7 +93,13 @@ impl Site {
             _tmp: tmp,
         };
         for _ in 0..50 {
-            if site.client.get(site.url("/registry/search")).send().await.is_ok() {
+            if site
+                .client
+                .get(site.url("/registry/search"))
+                .send()
+                .await
+                .is_ok()
+            {
                 return site;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -220,7 +231,10 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
         .expect("same-origin publish"),
     )
     .await;
-    assert_eq!(status, 200, "a same-origin cookie publish is served: {body}");
+    assert_eq!(
+        status, 200,
+        "a same-origin cookie publish is served: {body}"
+    );
 
     // Without Fetch Metadata, an `Origin` naming this site is accepted too.
     let (status, body) = status_and_body(
@@ -234,7 +248,10 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
         .expect("own-origin publish"),
     )
     .await;
-    assert_eq!(status, 200, "an own-Origin cookie publish is served: {body}");
+    assert_eq!(
+        status, 200,
+        "an own-Origin cookie publish is served: {body}"
+    );
     assert!(published(&versions(&site).await, "0.2.0"));
 
     // --- Cross-site cookie POSTs are refused before the registry acts. ---
@@ -249,7 +266,10 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
         .expect("cross-site publish"),
     )
     .await;
-    assert_eq!(status, 403, "a cross-site cookie publish is refused: {body}");
+    assert_eq!(
+        status, 403,
+        "a cross-site cookie publish is refused: {body}"
+    );
     assert!(
         body.contains("cross-origin request blocked"),
         "refused by the CSRF policy, not by the registry: {body}"
@@ -283,7 +303,10 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
         .expect("foreign-origin publish"),
     )
     .await;
-    assert_eq!(status, 403, "a foreign-Origin cookie publish is refused: {body}");
+    assert_eq!(
+        status, 403,
+        "a foreign-Origin cookie publish is refused: {body}"
+    );
     assert!(!published(&versions(&site).await, "0.4.0"));
 
     // Yank is a state change too.
@@ -356,7 +379,10 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
             .expect("bearer PAT publish"),
     )
     .await;
-    assert_eq!(status, 200, "a bearer-PAT publish is not CSRF-gated: {body}");
+    assert_eq!(
+        status, 200,
+        "a bearer-PAT publish is not CSRF-gated: {body}"
+    );
 
     // An impresspress access token in the `Authorization` header.
     let (status, body) = status_and_body(

@@ -5,9 +5,11 @@
 //! path that 404s on our unmigrated `dist/`) — we define `wafer-site-main`
 //! here. It keeps the same middleware chain (security-headers → cors →
 //! readonly-guard → router) but configures `wafer-run/router` with
-//! site-specific routes so `/docs`, `/playground`, `/registry`, and
-//! the landing page resolve to site-owned blocks, while `/b/**` still
-//! delegates to `impresspress/router` for auth/admin/etc.
+//! site-specific routes so `/docs`, `/playground` and the landing page
+//! resolve to site-owned blocks, while `/b/**` still delegates to
+//! `impresspress/router` for auth/admin/etc. `/registry` goes to
+//! `impresspress/router` too, which dispatches it to the site-owned
+//! registry block through impresspress's request pipeline.
 
 pub mod site;
 

@@ -25,6 +25,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use impresspress_core::builder::ImpresspressBuilder;
 use impresspress_core::features::BlockSettings;
+use impresspress_core::RouteAccess;
 #[cfg(feature = "target-native")]
 use wafer_block_local_storage::service::LocalStorageService;
 use wafer_core::interfaces::storage::service::StorageService;
@@ -38,13 +39,23 @@ use wafer_core::interfaces::storage::service::StorageService;
 
 /// Pre-build hook: applies site-specific [`ImpresspressBuilder`] configuration.
 ///
-/// Currently just wires [`block_settings_for_site`]. Kept as its own
-/// function for symmetry with [`register_post_build_for_site`] and so the
-/// cloudflare worker entry can pass it as a closure argument.
+/// Wires [`block_settings_for_site`] and registers `/registry` as a route of
+/// `impresspress/router`, so every registry request runs through
+/// impresspress's request pipeline before the registry block sees it — the
+/// CSRF origin policy (`impresspress_core::csrf::enforce_origin_policy`)
+/// that refuses a cookie-authenticated cross-site mutation, and the
+/// `request_logs` audit row. The route is [`RouteAccess::Public`]: the
+/// registry authenticates its own callers (`blocks::registry::auth`), since
+/// its CLI tokens are its own and its admin gate reads a claim the pipeline
+/// does not stamp.
 pub fn register_blocks_for_site(
     builder: ImpresspressBuilder,
 ) -> Result<ImpresspressBuilder, Box<dyn std::error::Error>> {
-    Ok(builder.block_settings(block_settings_for_site()))
+    Ok(builder.block_settings(block_settings_for_site()).add_route(
+        blocks::registry::ROUTE_PREFIX,
+        blocks::registry::NAME,
+        RouteAccess::Public,
+    ))
 }
 
 /// Post-build hook: registers site-owned blocks, overrides default block
