@@ -58,9 +58,12 @@ ACTIVE: flow-configuration
 <h3>Flow Config</h3>
 <p>The top-level <code>config</code> object supports:</p>
 <ul>
-    <li><code>on_error</code> — error policy: <code>"stop"</code> (abort flow) or <code>"continue"</code> (skip failed block)</li>
-    <li><code>timeout</code> — request timeout (e.g. <code>"30s"</code>, <code>"5m"</code>)</li>
+    <li><code>on_error</code> — error policy: <code>"stop"</code> (abort the flow, the default) or <code>"continue"</code> (record the failed step's output as <code>null</code> and go on)</li>
+    <li><code>timeout</code> — flow timeout (e.g. <code>"250ms"</code>, <code>"30s"</code>, <code>"5m"</code>, <code>"2h"</code>; a bare number is seconds), at most 24 hours</li>
+    <li><code>timeout_ms</code> — the same timeout in milliseconds; set at most one of <code>timeout</code> and <code>timeout_ms</code></li>
+    <li><code>max_steps</code> — cap on step executions (default 1000)</li>
 </ul>
+<p>Any other key or <code>on_error</code> value is refused when the flow is loaded. See the <a href="/docs/waferflow-spec">WaferFlow Spec</a> for the full field list.</p>
 
 <h3>Flow Tree Structure</h3>
 <p>Each node in the flow tree has:</p>

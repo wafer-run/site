@@ -1,206 +1,359 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://wafer.run/schema/waferflow/v0.1.0/flow.schema.json",
-  "title": "WaferFlow",
-  "description": "A declarative, medium-agnostic flow specification. Data flows through pure steps via an accumulator pattern — each step receives input, produces output, and downstream steps reference previous outputs with $.step-id.field expressions.",
-  "type": "object",
-  "required": ["id", "name", "version", "steps"],
-  "properties": {
-    "id": {
-      "type": "string",
-      "description": "Unique identifier for this flow."
-    },
-    "name": {
-      "type": "string",
-      "description": "Human-readable name."
-    },
-    "version": {
-      "type": "string",
-      "description": "Semantic version of this flow definition.",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$"
-    },
-    "description": {
-      "type": "string",
-      "description": "Optional description of what this flow does."
-    },
-    "input": {
-      "$ref": "#/$defs/PortSchema",
-      "description": "Schema for the flow's input data (available as $.input)."
-    },
-    "output": {
-      "$ref": "#/$defs/PortSchema",
-      "description": "Schema for the flow's output data."
-    },
-    "steps": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/Step" },
-      "minItems": 1,
-      "description": "Ordered list of steps. Execution follows this order unless overridden by 'next' routing."
-    },
-    "config": {
-      "$ref": "#/$defs/FlowConfig",
-      "description": "Optional flow-level configuration."
-    }
-  },
-  "additionalProperties": false,
-
   "$defs": {
-    "Step": {
-      "type": "object",
-      "required": ["id", "block"],
+    "ConfigMapEntry": {
+      "description": "One row of a flow's `config_map`: a user-facing flow-config key is\nforwarded into `target` block's config under `key`.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique step identifier. Used as the key in the accumulator ($.step-id.field).",
-          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
-        },
-        "block": {
-          "type": "string",
-          "description": "Block to execute. References a registered block by name or a BlockDef id."
-        },
-        "input": {
-          "type": "object",
-          "description": "Input map for the block. Values can be literal JSON or expression strings ($.step-id.field).",
-          "additionalProperties": true
-        },
-        "next": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/NextEntry" },
-          "description": "Conditional routing. Evaluated in order; first matching 'when' wins. A NextEntry without 'when' is the default."
-        },
-        "each": {
-          "type": "string",
-          "description": "Expression resolving to an array. The step runs once per item; $.each.item and $.each.index are set."
-        },
-        "parallel": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["steps"],
-            "properties": {
-              "steps": {
-                "type": "array",
-                "items": { "$ref": "#/$defs/Step" },
-                "minItems": 1
-              }
-            },
-            "additionalProperties": false
-          },
-          "description": "Parallel branches. Each branch runs concurrently; results are merged into the accumulator."
-        },
-        "description": {
-          "type": "string",
-          "description": "Optional human-readable description of this step."
-        }
-      },
-      "additionalProperties": false
-    },
-
-    "NextEntry": {
-      "type": "object",
-      "properties": {
-        "when": {
-          "type": "string",
-          "description": "Expression that must evaluate to true for this route to be taken. Omit for the default route."
-        },
-        "step": {
-          "type": "string",
-          "description": "Target step id within this flow."
-        },
-        "flow": {
-          "type": "string",
-          "description": "Target flow id to transfer execution to."
-        }
-      },
-      "oneOf": [
-        { "required": ["step"] },
-        { "required": ["flow"] }
-      ],
-      "additionalProperties": false
-    },
-
-    "PortSchema": {
-      "type": "object",
-      "description": "JSON Schema subset describing typed input or output ports.",
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["object", "array", "string", "number", "integer", "boolean", "null"]
-        },
-        "properties": {
-          "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/PortSchema" }
-        },
-        "items": {
-          "$ref": "#/$defs/PortSchema"
-        },
-        "required": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "description": {
+        "key": {
+          "description": "Key within the target block's config to populate.",
           "type": "string"
         },
-        "default": {}
+        "target": {
+          "description": "Block name receiving the value (e.g. `\"crypto/jwt-sign\"`).",
+          "type": "string"
+        }
       },
-      "additionalProperties": false
+      "required": [
+        "target",
+        "key"
+      ],
+      "type": "object"
     },
-
     "FlowConfig": {
-      "type": "object",
+      "additionalProperties": false,
+      "description": "Flow-level execution policy: a timeout, a step budget and an error\npolicy that wrap the whole step sequence rather than any single step.\nSet at most one of `timeout` and `timeout_ms`.",
       "properties": {
-        "timeout_ms": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Maximum execution time in milliseconds."
-        },
         "max_steps": {
-          "type": "integer",
+          "description": "Cap on the number of step executions, to prevent infinite loops.\nDefaults to 1000.",
+          "format": "uint64",
           "minimum": 1,
-          "description": "Maximum number of step executions (prevents infinite loops)."
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "on_error": {
-          "type": "string",
-          "enum": ["stop", "skip", "retry"],
-          "default": "stop",
-          "description": "Error handling strategy."
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the runtime reacts when a step errors. Defaults to `\"stop\"`."
+        },
+        "timeout": {
+          "description": "Human-readable timeout (e.g. `\"30s\"`) — alternative to `timeout_ms`: a\nwhole number followed by `ms`, `s`, `m` or `h` (a bare number is\nseconds), at most 24h.",
+          "pattern": "^[0-9]+(ms|s|m|h)?$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "description": "Hard timeout for the entire flow, in milliseconds (at most 24h).",
+          "maximum": 86400000,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
-      "additionalProperties": false
+      "type": "object"
     },
-
-    "BlockDef": {
-      "type": "object",
-      "required": ["id", "name", "version"],
+    "NextEntry": {
+      "description": "A routing rule in a step's `next` list: when `when` evaluates to true,\njump to `step` (within this flow) or `flow` (a different flow id). An\nentry without `when` is the default fallthrough.",
+      "oneOf": [
+        {
+          "properties": {
+            "step": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "step"
+          ]
+        },
+        {
+          "properties": {
+            "flow": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "flow"
+          ]
+        }
+      ],
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique block identifier (e.g. @org/repo/block)."
+        "flow": {
+          "description": "Target flow id to hand control over to.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "name": {
-          "type": "string",
-          "description": "Human-readable block name."
+        "step": {
+          "description": "Target step id within the current flow.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "version": {
-          "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        "when": {
+          "description": "Optional `when` expression. Omit for the default fallthrough entry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "OnError": {
+      "description": "What the runtime does when a step returns an error.",
+      "oneOf": [
+        {
+          "const": "stop",
+          "description": "Stop the flow and return the step's error.",
+          "type": "string"
+        },
+        {
+          "const": "continue",
+          "description": "Record the failed step's output as `null` and run the next step.",
+          "type": "string"
+        }
+      ]
+    },
+    "ParallelBranch": {
+      "description": "One branch of a step's `parallel` fan-out: an ordered list of steps that\nexecutes concurrently with its sibling branches.",
+      "properties": {
+        "steps": {
+          "description": "Ordered steps run within this branch.",
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "type": "object"
+    },
+    "PortSchema": {
+      "description": "JSON Schema subset used to describe typed flow / step ports.\n\nMirrors a handful of JSON Schema keywords (`type`, `properties`, `items`,\n`required`, `default`, `description`) — enough for the introspection UI\nwithout pulling in a full schema library.",
+      "properties": {
+        "default": {
+          "description": "Default value supplied when the caller omits this field."
         },
         "description": {
+          "description": "Free-form description shown in introspection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortSchema"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For `array` schemas, the element schema."
+        },
+        "properties": {
+          "additionalProperties": {
+            "$ref": "#/$defs/PortSchema"
+          },
+          "description": "For `object` schemas, the property-name → sub-schema map.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "required": {
+          "description": "For `object` schemas, the list of required property names.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "JSON Schema `type` keyword (`\"object\"`, `\"array\"`, `\"string\"`, ...).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Step": {
+      "description": "A single step in a flow — one block invocation plus its input template\nand (optionally) the routing rules for the next step.",
+      "properties": {
+        "block": {
+          "description": "Registered block name to invoke (e.g. `\"crypto/jwt-sign\"`).",
+          "type": "string"
+        },
+        "config": {
+          "description": "Per-step block config for this invocation only (overrides flow- and\ninstance-level config)."
+        },
+        "description": {
+          "description": "Human-readable description shown in introspection endpoints.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "each": {
+          "description": "`$.path` to an array: the step's block runs once per item, in order,\nwith `$.each.item` and `$.each.index` set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Step identifier unique within the flow (`input` and `each` are\nreserved); also the key under which the step's output is stored, so\nlater steps read it as `$.<id>.<field>`.",
           "type": "string"
         },
         "input": {
-          "$ref": "#/$defs/PortSchema"
+          "description": "JSON template passed to the block as input. String values starting\nwith `$.` are resolved against the accumulator at execution time."
         },
-        "output": {
-          "$ref": "#/$defs/PortSchema"
+        "next": {
+          "description": "Conditional routing entries evaluated in order; the first whose\n`when` is true (or the lone default entry) wins.",
+          "items": {
+            "$ref": "#/$defs/NextEntry"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
-        "runtime": {
-          "type": "string",
-          "enum": ["wasm", "native", "both"],
-          "description": "Supported runtime targets."
+        "parallel": {
+          "description": "Parallel branches, run concurrently before the step's own block;\ntheir accumulator entries are merged once all of them finish.",
+          "items": {
+            "$ref": "#/$defs/ParallelBranch"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
-      "additionalProperties": false
+      "required": [
+        "id",
+        "block"
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$id": "https://wafer.run/schema/waferflow/v0.1.0/flow.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A declarative flow: metadata, typed input/output ports, the ordered steps to execute, and optional flow-level config.",
+  "properties": {
+    "blocks": {
+      "description": "Names of the blocks this flow depends on. Informational: the runtime\nresolves blocks from the steps, not from this list.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FlowConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Optional flow-level execution policy (timeouts, step budget, error handling)."
+    },
+    "config_defaults": {
+      "additionalProperties": true,
+      "description": "Config merged into other blocks' configs, keyed by block name. Applied\ntogether with `config_map`: only when the flow declares a `config_map`\nand config is registered under the flow's id.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "config_map": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ConfigMapEntry"
+      },
+      "description": "Declarative config routing: maps user-facing config keys to\n`(target block, key within that block's config)` pairs so a flow\ncan expose a flat config surface that fans out to its component blocks.",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "description": {
+      "description": "Free-form description shown in introspection endpoints.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "id": {
+      "description": "Stable identifier for the flow (used by the runtime registry).",
+      "type": "string"
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PortSchema"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "JSON Schema describing the data the caller must supply as `$.input`."
+    },
+    "name": {
+      "description": "Human-readable name displayed in admin UIs and logs.",
+      "type": "string"
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PortSchema"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "JSON Schema describing the value returned to the caller."
+    },
+    "steps": {
+      "description": "Ordered list of steps; execution starts at `steps[0]` unless a\n`next` entry redirects.",
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "version": {
+      "description": "SemVer string for the flow definition itself (not the runtime).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "version",
+    "steps"
+  ],
+  "title": "WaferFlow",
+  "type": "object"
 }
