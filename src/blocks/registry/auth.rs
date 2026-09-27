@@ -4,8 +4,9 @@
 //!
 //! - [`require_user`] — resolve the caller to an `AuthedUser` by checking a
 //!   Bearer PAT against `registry_tokens` first, then falling back to
-//!   impresspress's verifier for its session token (Bearer header or
-//!   `auth_token` cookie).
+//!   impresspress's verifier for its session token (Bearer header, or the
+//!   `auth_token` cookie when the request carries no `Authorization`
+//!   header).
 //! - [`require_admin`] — wraps `require_user` and additionally gates on the
 //!   configured admin email. Non-admins get the "coming-soon" response.
 //!
@@ -58,10 +59,15 @@ pub struct AuthedUser {
 ///    the `auth_token` cookie impresspress's login sets — checked by
 ///    [`verify_access_token`], impresspress's one token verifier, under the
 ///    deployment's own policy: the secret from the config snapshot and the
-///    issuer [`expected_issuer`] resolves. `/registry/**` is routed straight
-///    from the site flow rather than through `impresspress/router`, so the
-///    registry runs the check itself; the reads it makes are covered by
-///    [`auth_table_grants`].
+///    issuer [`expected_issuer`] resolves. `impresspress/router` verifies the
+///    same token before dispatching here, but stamps no `auth_method`, which
+///    [`require_admin`] gates on, so the registry runs the check itself; the
+///    reads it makes are covered by [`auth_table_grants`].
+///
+/// The CSRF origin policy that pipeline applies exempts a request carrying
+/// an `Authorization` header and judges one without it by its cookie, so
+/// the cookie is consulted here only when that header is absent — a
+/// credential the policy exempted is never one it did not judge.
 ///
 /// Returns an `OutputStream` error response on any failure path so callers
 /// can early-return without additional shaping. A check that could not be
@@ -119,14 +125,18 @@ pub fn auth_table_grants() -> Vec<ResourceGrant> {
     ]
 }
 
-/// Find a session token in the request — either the Authorization Bearer
-/// header or the `auth_token` cookie impresspress's login sets.
+/// Find a session token in the request — the Authorization Bearer header,
+/// or, when the request has no `Authorization` header at all, the
+/// `auth_token` cookie impresspress's login sets. The same source rule
+/// `impresspress/router` applies when it decides whether a request is
+/// cookie-authenticated for the CSRF origin policy.
 fn find_jwt_token(msg: &Message) -> Option<String> {
     let auth_header = msg.header("authorization");
-    if let Some(t) = auth_header.strip_prefix("Bearer ") {
-        if !t.is_empty() {
-            return Some(t.to_string());
-        }
+    if !auth_header.is_empty() {
+        return auth_header
+            .strip_prefix("Bearer ")
+            .filter(|t| !t.is_empty())
+            .map(str::to_string);
     }
     let cookie = msg.cookie("auth_token");
     (!cookie.is_empty()).then(|| cookie.to_string())
