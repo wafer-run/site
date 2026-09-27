@@ -13,6 +13,9 @@ on:
 # so IMPRESSPRESS_REF must build against WAFER_RUN_REF.
 env:
   WAFER_RUN_REF: abecd3f32e518b8e5ed79bf7f2c5f1997295ea85
+  # The Jsuppers fork, not impresspress/impresspress: the org repo is frozen
+  # (no pushes since the 2026-09-05 hackathon freeze) and impresspress work
+  # lands on the fork's main.
   IMPRESSPRESS_REPO: Jsuppers/impresspress
   IMPRESSPRESS_REF: 7fc05d9aa3ef74d76c454b874bc12f5f8116d4d7
 
