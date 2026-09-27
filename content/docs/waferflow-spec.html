@@ -76,17 +76,7 @@ ACTIVE: waferflow-spec
 }</code></pre>
 <p>Set at most one of <code>timeout</code> and <code>timeout_ms</code>; either must be greater than zero and at most 24 hours. Any other key, or any other <code>on_error</code> value, fails to parse. See <a href="#error-handling">Error Handling</a> for <code>on_error</code>.</p>
 
-<h4>BlockDef</h4>
-<p>Block metadata. Defined separately from flows in a <code>block.json</code> file.</p>
-<pre><code>{
-    "id":          string,              // required — e.g. "@wafer-run/wafer-run/sqlite"
-    "name":        string,              // required — human-readable name
-    "version":     string,              // required — semver
-    "description": string | null,       // optional
-    "input":       PortSchema | null,   // optional — input contract
-    "output":      PortSchema | null,   // optional — output contract
-    "runtime":     "wasm" | "native" | "both" | null  // optional
-}</code></pre>
+<p>Block metadata (a block's id, ports and runtime) is not part of a flow document and is not in the flow schema; see <a href="/docs/waferflow-blocks">WaferFlow Blocks</a>.</p>
 
 <h3>Flow Control</h3>
 

@@ -24,6 +24,7 @@ const SCHEMA_ID: &str = "https://wafer.run/schema/waferflow/v0.1.0/flow.schema.j
 
 /// Docs pages whose `<pre><code>` flow documents must parse and validate.
 const FLOW_DOC_PAGES: &[&str] = &[
+    "content/docs/flow-configuration.html",
     "content/docs/waferflow.html",
     "content/docs/waferflow-spec.html",
     "content/docs/waferflow-examples.html",
@@ -74,9 +75,12 @@ fn unescape_html(text: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// Every `<pre><code>` block on `page` that is a complete flow document: a
-/// JSON object with `id` and `steps`. Blocks that are fragments or
-/// annotated type sketches are not JSON and are skipped.
+/// Every `<pre><code>` block on `page` that is a flow document: a JSON
+/// object with a `steps` key (or a `root` key, the tree format the runtime
+/// no longer parses — which `docs_flow_examples_parse_and_validate` then
+/// refuses). A block that opens like one but is not JSON fails here unless
+/// it is an annotated type sketch (carries `//` comments); fragments that are
+/// not objects (`"steps": [...]`, step objects, prose) are not flows.
 fn flow_documents(page: &str) -> Vec<String> {
     let html = std::fs::read_to_string(site_path(page)).expect("read docs page");
     let mut documents = Vec::new();
@@ -88,17 +92,37 @@ fn flow_documents(page: &str) -> Vec<String> {
             .expect("an unterminated <pre><code>");
         let text = unescape_html(&rest[..end]);
         rest = &rest[end..];
-        if let Ok(Value::Object(object)) = serde_json::from_str::<Value>(&text) {
-            if object.contains_key("id") && object.contains_key("steps") {
-                documents.push(text);
+        let looks_like_a_flow = text.trim_start().starts_with('{')
+            && (text.contains("\"steps\"") || text.contains("\"root\""));
+        match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Object(object)) => {
+                if object.contains_key("steps") || object.contains_key("root") {
+                    documents.push(text);
+                }
             }
+            _ if looks_like_a_flow && !text.contains("//") => {
+                panic!("a flow example in {page} is not JSON:\n{text}")
+            }
+            _ => {}
         }
     }
     documents
 }
 
+/// The published schema, compiled.
+fn published_validator() -> jsonschema::Validator {
+    let schema: Value = serde_json::from_str(
+        &std::fs::read_to_string(site_path(SCHEMA_PATH)).expect("read the published schema"),
+    )
+    .expect("the published schema is JSON");
+    jsonschema::draft202012::new(&schema).expect("the published schema compiles")
+}
+
+/// Every flow example on the WaferFlow docs pages parses and validates in
+/// the runtime and is valid against the published schema.
 #[test]
 fn docs_flow_examples_parse_and_validate() {
+    let validator = published_validator();
     let mut checked = 0;
     for page in FLOW_DOC_PAGES {
         for document in flow_documents(page) {
@@ -110,12 +134,22 @@ fn docs_flow_examples_parse_and_validate() {
                     flow.id
                 );
             }
+            let value: Value = serde_json::from_str(&document).expect("the example is JSON");
+            let schema_errors: Vec<String> = validator
+                .iter_errors(&value)
+                .map(|e| e.to_string())
+                .collect();
+            assert!(
+                schema_errors.is_empty(),
+                "flow example {:?} in {page} fails the published schema: {schema_errors:?}",
+                flow.id
+            );
             checked += 1;
         }
     }
     // Guards the extraction: the examples page alone holds several flows.
     assert!(
-        checked >= 3,
+        checked >= 6,
         "found only {checked} flow examples in the docs"
     );
 }
@@ -124,4 +158,9 @@ fn docs_flow_examples_parse_and_validate() {
 fn site_flow_parses_and_validates() {
     let flow = wafer_flow::parse(wafer_site::flows::site::JSON).expect("the site flow parses");
     wafer_flow::validate(&flow).expect("the site flow validates");
+    let value: Value = serde_json::from_str(wafer_site::flows::site::JSON).expect("JSON");
+    assert!(
+        published_validator().is_valid(&value),
+        "the site flow fails the published schema"
+    );
 }
