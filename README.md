@@ -2,7 +2,7 @@
 
 The website, docs, playground, and package registry behind [wafer.run](https://wafer.run).
 
-Built on [WAFER](https://github.com/wafer-run/wafer-run) + [impresspress](https://github.com/impresspress/impresspress) — both must be checked out as siblings (path deps in `Cargo.toml`):
+Built on [WAFER](https://github.com/wafer-run/wafer-run) + [impresspress](https://github.com/Jsuppers/impresspress) — both must be checked out as siblings (path deps in `Cargo.toml`), at the commits `.github/workflows/ci.yml` pins (`WAFER_RUN_REF`, `IMPRESSPRESS_REF`):
 
 ```
 workspace/
@@ -14,13 +14,12 @@ workspace/
 ## Run it locally
 
 ```bash
-cp .env.example .env       # then fill in JWT secret + admin email
+cp .env.example .env       # then fill in the admin email
 cargo run                  # listens on http://localhost:8090
 ```
 
 `.env.example` documents every variable the binary reads. The defaults work for a local dev run; you only have to fill in:
 
-- `WAFER_RUN__AUTH__JWT_SECRET` — any random string
 - `WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_EMAIL` and `WAFER_RUN__REGISTRY__ADMIN_EMAIL` — your email
 - The `*GITHUB*` triple if you want OAuth login
 

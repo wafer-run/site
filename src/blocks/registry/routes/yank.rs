@@ -34,8 +34,12 @@ pub async fn yank(
     };
 
     // Best-effort reason extraction — missing body, invalid JSON, or no
-    // `reason` field all collapse to `None`. We don't require a body.
-    let body = input.collect_to_bytes().await;
+    // `reason` field all collapse to `None`. We don't require a body, but a
+    // body stream that fails before arriving whole answers with its error.
+    let body = match input.collect_to_bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => return OutputStream::error(e),
+    };
     let reason = if body.is_empty() {
         None
     } else {

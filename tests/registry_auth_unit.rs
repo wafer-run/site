@@ -1,15 +1,14 @@
-//! Unit tests for the Task-11 admin gate.
-//!
-//! The registry-bootstrap harness doesn't wire `wafer-run/auth`, so tests
-//! that exercise the auth-block delegation path are deferred to Tasks 12–13
-//! (which need a full impresspress runtime anyway). What we can cover here:
+//! Unit tests for the registry's auth gate.
 //!
 //! 1. `require_user`: bearer-PAT resolution against `registry_tokens`.
-//! 2. `require_admin`: non-admin email (empty, because `fetch_email` has
-//!    nothing to call) falls through to the 403 coming-soon JSON branch.
+//! 2. `require_admin`: a PAT whose email is not the admin's falls through to
+//!    the 403 coming-soon JSON branch.
+//! 3. `require_user`: no credential at all is a 401.
+//! 4. `require_user`: an impresspress session token is checked by
+//!    impresspress's verifier — a signed-in session resolves, and the same
+//!    token after logout (blocklisted) does not.
 //!
-//! Both tests talk to the registry block's in-memory harness directly —
-//! no HTTP.
+//! The tests talk to the registry block's harness directly — no HTTP.
 
 mod common;
 
@@ -24,15 +23,6 @@ use wafer_site::blocks::registry::{
     auth::{require_admin, require_user},
     RegistryConfig,
 };
-
-fn test_cfg() -> RegistryConfig {
-    RegistryConfig {
-        admin_email: "admin@example.com".into(),
-        storage_key_prefix: "registry".into(),
-        jwt_secret: "test-secret".into(),
-        required_auth_method: String::new(),
-    }
-}
 
 /// Reads the HTTP status code out of an `OutputStream` by draining it —
 /// mirrors what the real HTTP adapter does with `META_RESP_STATUS`.
@@ -91,7 +81,7 @@ async fn bearer_pat_resolves_against_registry_tokens() {
     msg.set_meta("http.header.authorization", format!("Bearer {raw}"));
 
     // `OutputStream` isn't `Debug`, so we can't use `.expect`.
-    let Ok(user) = require_user(ctx.as_ref(), &msg, &test_cfg()).await else {
+    let Ok(user) = require_user(ctx.as_ref(), &msg).await else {
         panic!("bearer PAT resolves to AuthedUser");
     };
     assert_eq!(user.id, "u1");
@@ -117,7 +107,6 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
     let cfg = RegistryConfig {
         admin_email: "admin@example.com".into(),
         storage_key_prefix: "registry".into(),
-        jwt_secret: "test-secret".into(),
         required_auth_method: String::new(),
     };
 
@@ -139,16 +128,54 @@ async fn require_admin_rejects_non_admin_with_coming_soon_json() {
 }
 
 #[tokio::test]
-async fn missing_credentials_delegates_to_auth_block_and_returns_401() {
-    // No PAT, no cookie — the auth-block delegation path runs and fails
-    // (no `wafer-run/auth` in the in-memory harness). `require_user` must
-    // surface that as the 401 `unauthorized` JSON.
+async fn missing_credentials_returns_401() {
+    // No PAT, no cookie: `require_user` answers the 401 `unauthorized` JSON.
     let ctx = common::boot_registry_against_memory().await;
 
     let msg = Message::new("retrieve");
-    let Err(err_out) = require_user(ctx.as_ref(), &msg, &test_cfg()).await else {
+    let Err(err_out) = require_user(ctx.as_ref(), &msg).await else {
         panic!("no creds should not resolve");
     };
 
     assert_eq!(status_of(err_out).await, 401);
+}
+
+/// A session impresspress's real login route issued resolves to its user
+/// through the `auth_token` cookie, and the same cookie after the real
+/// logout route blocklisted its token does not: the registry checks session
+/// tokens with impresspress's verifier (blocklist and `auth_version`
+/// included), not a copy of its signature check.
+#[tokio::test]
+async fn session_token_resolves_until_logout() {
+    let ctx = common::boot_registry_against_memory().await;
+    let email = "someone@example.com";
+    let password = "correct horse battery staple";
+    let user_id = ctx.seed_account(email, password, "user").await;
+    let session = ctx.sign_in(email, password).await;
+
+    let mut msg = Message::new("retrieve");
+    msg.set_meta(
+        "http.header.cookie",
+        format!("auth_token={}", session.cookie),
+    );
+    let Ok(user) = require_user(ctx.as_ref(), &msg).await else {
+        panic!("a signed-in session resolves");
+    };
+    assert_eq!(user.id, user_id);
+    assert_eq!(user.email, email);
+    assert_eq!(user.auth_method, "password");
+
+    let logout = session.bearer(impresspress_core::test_support::anon_msg(
+        "create",
+        "/b/auth/api/logout",
+    ));
+    let out = ctx.request(logout).await;
+    let parts = wafer_block::http_codec::collect_http_response(out).await;
+    // Logout answers with a redirect back to the site.
+    assert_eq!(parts.status, 303, "logout succeeds");
+
+    let Err(out) = require_user(ctx.as_ref(), &msg).await else {
+        panic!("a logged-out session must not resolve");
+    };
+    assert_eq!(status_of(out).await, 401);
 }

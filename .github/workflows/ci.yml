@@ -5,6 +5,20 @@ on:
     branches: [main]
   pull_request:
 
+# The site builds against sibling checkouts of wafer-run and impresspress
+# (path dependencies, see Cargo.toml). Both are pinned to exact commits so
+# the site's CI verdict changes only when this file does: bump a pin in the
+# same PR that adapts the site to it. Cargo.toml's [patch] table points
+# impresspress's git-pinned wafer-run crates at the same wafer-run checkout,
+# so IMPRESSPRESS_REF must build against WAFER_RUN_REF.
+env:
+  WAFER_RUN_REF: 3a8bdd83bd8a9784b3c2b30b87dd2cf5a2bfbe1e
+  # The Jsuppers fork, not impresspress/impresspress: the org repo is frozen
+  # (no pushes since the 2026-09-05 hackathon freeze) and impresspress work
+  # lands on the fork's main.
+  IMPRESSPRESS_REPO: Jsuppers/impresspress
+  IMPRESSPRESS_REF: 18205caa7cacf07bab7cc23b0ebcf5d1e8cac575
+
 jobs:
   rust:
     runs-on: ubuntu-latest
@@ -17,11 +31,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: wafer-run/wafer-run
+          ref: ${{ env.WAFER_RUN_REF }}
           path: wafer-run
       - name: Checkout impresspress
         uses: actions/checkout@v4
         with:
-          repository: impresspress/impresspress
+          repository: ${{ env.IMPRESSPRESS_REPO }}
+          ref: ${{ env.IMPRESSPRESS_REF }}
           path: impresspress
       - name: Set site env
         run: |
@@ -56,11 +72,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: wafer-run/wafer-run
+          ref: ${{ env.WAFER_RUN_REF }}
           path: wafer-run
       - name: Checkout impresspress
         uses: actions/checkout@v4
         with:
-          repository: impresspress/impresspress
+          repository: ${{ env.IMPRESSPRESS_REPO }}
+          ref: ${{ env.IMPRESSPRESS_REF }}
           path: impresspress
       - name: Set site env
         run: |
