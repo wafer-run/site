@@ -9,20 +9,17 @@
 //! not registered — the same default impresspress-native applies.
 
 use impresspress_core::migration_helper;
-use wafer_core::clients::config;
 use wafer_run::context::Context;
 
 const SQL_001_SQLITE: &str = include_str!("001_initial_schema.sqlite.sql");
 const SQL_001_POSTGRES: &str = include_str!("001_initial_schema.postgres.sql");
 
 pub async fn apply(ctx: &dyn Context) -> Result<(), String> {
-    let backend = config::get_default(ctx, "WAFER_RUN_SHARED__DATABASE__BACKEND", "sqlite")
-        .await
-        .to_ascii_lowercase();
-    let sql = if backend == "postgres" {
-        SQL_001_POSTGRES
-    } else {
-        SQL_001_SQLITE
-    };
-    migration_helper::apply_if_blessed(ctx, "wafer-run/registry", sql).await
+    migration_helper::apply_migrations(
+        ctx,
+        "wafer-run/registry",
+        &[SQL_001_SQLITE],
+        &[SQL_001_POSTGRES],
+    )
+    .await
 }

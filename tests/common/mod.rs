@@ -1,22 +1,24 @@
 //! Shared test harness for the registry block's integration tests.
 //!
+//! Every test runs the registry block in the frame production gives it,
+//! over impresspress's own test runtime
+//! ([`impresspress_core::test_support::TestContext`]): a real SQLite
+//! database behind the production database block with admin's and auth's
+//! migrations applied, the production storage block over an in-memory
+//! store, the production config block, a real crypto block and the real
+//! `impresspress/auth-ui` login routes. WRAP grants and the registry's
+//! `requires` are enforced as the runtime enforces them, so a call the
+//! registry makes that production would refuse fails here too.
+//!
 //! Two flavors:
 //!
-//! - [`boot_registry_against_memory`] — in-process only. Returns an
-//!   [`InMemoryCtx`] and a booted registry block; callers invoke helpers in
-//!   `registry::db` directly. Used by `registry_bootstrap` and
-//!   `registry_queries`.
+//! - [`boot_registry_against_memory`] — in-process only. Returns the
+//!   registry-framed context; callers invoke helpers in `registry::db`
+//!   directly.
 //!
-//! - [`start_test_site`] / [`start_test_site_with_admin`] — the same
-//!   in-memory stack, plus a real ephemeral HTTP server bound to
-//!   `127.0.0.1:0`. Returns a [`TestApp`] with a `reqwest::Client` pointed
-//!   at the server's base URL. Used by the HTTP-level tests.
-//!
-//! Task 13 extends the harness to wire a `wafer-run/storage` block
-//! (LocalStorageService on a tempdir) and a minimal `wafer-run/auth` stub
-//! that answers `auth.require_user` / `auth.user_profile` from a
-//! statically-seeded user row. That stub is what lets the publish admin
-//! gate work without dragging the full auth block into the test graph.
+//! - [`start_test_site`] / [`start_test_site_with_admin`] — the same stack,
+//!   plus a real ephemeral HTTP server bound to `127.0.0.1:0`. Returns a
+//!   [`TestApp`] with a `reqwest::Client` pointed at the server's base URL.
 //!
 //! The HTTP dispatch path mirrors the production `wafer-run/http-listener`:
 //! axum request -> `http_to_message` -> `RegistryBlock::handle` ->
@@ -37,283 +39,35 @@ use axum::{
     routing::any,
     Router,
 };
+use impresspress_core::test_support::{InMemoryStorageService, TestContext};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use wafer_block_http_listener::{http_to_message, wafer_output_to_response};
-use wafer_run::{
-    context::Context, Block, InputStream, LifecycleEvent, LifecycleType, Message, OutputStream,
-    WaferError,
-};
+use wafer_run::{context::Context, Block, InputStream, LifecycleEvent, LifecycleType};
 
 use wafer_site::blocks::registry::{self, handlers::RegistryBlock, RegistryConfig};
 
-/// In-memory context wiring the three blocks the registry's publish/read
-/// paths need:
-///
-/// - `wafer-run/database` — SQLite-in-memory, backs the registry's own
-///   collections.
-/// - `wafer-run/storage` — LocalStorageService on a tempdir, so `put` /
-///   `delete` / `get` actually persist something we can verify.
-/// - `wafer-run/auth` — a minimal stub that resolves seeded
-///   `(user_id -> email)` mappings for `auth.user_profile`. Empty when
-///   unseeded, in which case `require_admin` treats the user as non-admin.
-#[derive(Clone)]
-pub struct InMemoryCtx {
-    db_block: Arc<dyn Block>,
-    storage_block: Arc<dyn Block>,
-    /// Seeded identities: `user_id -> email`. The stubbed
-    /// `auth.user_profile` matches the request's `user_id` against this
-    /// map. `auth.require_user` always fails in the stub — PAT-based auth
-    /// (via `db::resolve_bearer`) runs *before* the fallback, so only
-    /// `auth.user_profile` is exercised in practice.
-    identities: Arc<HashMap<String, String>>,
-    /// Holder for the tempdir backing LocalStorageService. Dropped when
-    /// the last clone of the context is, which tears the filesystem down
-    /// too. `Arc` so `clone_arc` can hand out additional owning handles
-    /// (`AuthServiceImpl::init` stashes one) without prematurely tearing
-    /// down storage when the original context borrow ends.
-    _storage_tmp: Arc<tempfile::TempDir>,
-}
+/// The registry's test runtime: a [`TestContext`] running as
+/// `wafer-run/registry`.
+pub type RegistryCtx = TestContext;
 
-impl InMemoryCtx {
-    pub fn new() -> Self {
-        Self::new_with_identities(HashMap::new())
-    }
-
-    /// Construct with a `user_id -> email` identity map. The stub
-    /// `wafer-run/auth` block uses it to answer `auth.user_profile`
-    /// lookups; `auth.require_user` always errors (tests exercise PAT
-    /// auth, which runs earlier in `require_user`).
-    pub fn new_with_identities(identities: HashMap<String, String>) -> Self {
-        // Database: in-memory SQLite.
-        let svc = Arc::new(
-            wafer_block_sqlite::service::SQLiteDatabaseService::open_in_memory()
-                .expect("open in-memory sqlite"),
-        );
-        let db_block: Arc<dyn Block> = Arc::new(
-            wafer_core::service_blocks::database::DatabaseBlock::new(svc),
-        );
-
-        // Storage: LocalStorageService on a tempdir. Using the real block
-        // rather than a shim gives us accurate error types (folders get
-        // auto-created under LocalStorageService::put's path).
-        let tmp = tempfile::TempDir::new().expect("tempdir for storage");
-        let storage_svc = Arc::new(
-            wafer_block_local_storage::service::LocalStorageService::new(tmp.path())
-                .expect("LocalStorageService"),
-        );
-        let storage_block: Arc<dyn Block> = Arc::new(
-            wafer_core::service_blocks::storage::StorageBlock::new(storage_svc),
-        );
-
-        Self {
-            db_block,
-            storage_block,
-            identities: Arc::new(identities),
-            _storage_tmp: Arc::new(tmp),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Context for InMemoryCtx {
-    async fn call_block(&self, block_name: &str, msg: Message, input: InputStream) -> OutputStream {
-        match block_name {
-            "wafer-run/database" => self.db_block.handle(self, msg, input).await,
-            "wafer-run/storage" => self.storage_block.handle(self, msg, input).await,
-            "wafer-run/auth" => self.handle_auth_stub(msg, input).await,
-            _ => OutputStream::error(WaferError::new(
-                wafer_run::ErrorCode::NotFound,
-                format!("block '{block_name}' not registered in test ctx"),
-            )),
-        }
-    }
-
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-
-    fn config_get(&self, _key: &str) -> Option<&str> {
-        None
-    }
-
-    // The trait default fails closed ("context does not implement
-    // resource-access enforcement") since wafer-run SP-A; this fixture
-    // routes to real Database/Storage blocks, so migrations' DDL would be
-    // denied without an explicit permissive override. Mirrors
-    // impresspress-core's `MigrationTestCtx` (tests/auth/common.rs).
-    fn check_resource_access(
-        &self,
-        _resource: &str,
-        _resource_type: wafer_run::ResourceType,
-        _is_write: bool,
-    ) -> Result<(), WaferError> {
-        Ok(())
-    }
-
-    fn clone_arc(&self) -> Arc<dyn Context> {
-        // Cheap: every interior field is `Arc`-shared.
-        Arc::new(self.clone())
-    }
-}
-
-impl InMemoryCtx {
-    /// Minimal `wafer-run/auth` stub.
-    ///
-    /// - `auth.require_user` — honors the session-cookie convention
-    ///   `Cookie: session=<user_id>`. When the incoming `http.header.cookie`
-    ///   meta carries `session=<id>` and `<id>` is present in
-    ///   `identities`, return `{"user_id": "<id>"}`. Every other shape
-    ///   (no cookie, unknown user, other cookie values) surfaces as
-    ///   `Unauthenticated`. This keeps the PAT-based path (which runs
-    ///   *before* the auth-block fallback in
-    ///   `registry::auth::require_user`) the primary credential in
-    ///   existing tests while letting a new cookie-branch test exercise
-    ///   the session flow end-to-end.
-    ///
-    /// - `auth.user_profile` — decodes `{"user_id": "..."}` from the body
-    ///   and returns the matching seeded email, or empty when unknown.
-    ///   Matches the real auth block's contract so the registry's
-    ///   `fetch_email` round-trip works verbatim.
-    async fn handle_auth_stub(&self, msg: Message, input: InputStream) -> OutputStream {
-        // `Message::new(op)` stores the service-op name in `msg.kind`, not
-        // in the `req.action` meta. The real auth block's handler
-        // discriminates on `msg.kind.as_str()` (see
-        // wafer-core/src/interfaces/auth/handler.rs) — we match the same
-        // field here so service-op calls route correctly.
-        let action = msg.kind.clone();
-        let body_bytes = input.collect_to_bytes().await;
-        match action.as_str() {
-            "auth.require_user" => {
-                // `registry::auth::require_user` copies the HTTP cookie
-                // header onto `http.header.cookie` before dispatching to
-                // the auth block; `Message::header("cookie")` reads it
-                // back via the same convention. Parse
-                // `session=<user_id>` out of it and match against the
-                // seeded identity map.
-                let cookie = msg.header("cookie");
-                let user_id = parse_session_cookie(cookie);
-                match user_id.filter(|id| self.identities.contains_key(id.as_str())) {
-                    Some(id) => {
-                        let body = serde_json::to_vec(&json!({ "user_id": id })).unwrap();
-                        OutputStream::respond(body)
-                    }
-                    None => OutputStream::error(WaferError::new(
-                        wafer_run::ErrorCode::Unauthenticated,
-                        "auth stub: missing or unknown session cookie".to_string(),
-                    )),
-                }
-            }
-            "auth.user_profile" => {
-                #[derive(serde::Deserialize)]
-                struct Req {
-                    user_id: String,
-                }
-                let Ok(req) = serde_json::from_slice::<Req>(&body_bytes) else {
-                    return OutputStream::error(WaferError::new(
-                        wafer_run::ErrorCode::InvalidArgument,
-                        "auth stub: bad body".to_string(),
-                    ));
-                };
-                let email = self
-                    .identities
-                    .get(&req.user_id)
-                    .cloned()
-                    .unwrap_or_default();
-                let body = serde_json::to_vec(&json!({ "email": email })).unwrap();
-                OutputStream::respond(body)
-            }
-            _ => {
-                // Fall back to HTTP-style dispatch: registry::auth::fetch_email
-                // makes a retrieve against `/b/auth/api/me` as a WRAP-safe
-                // way to get the profile without the service-op interface.
-                // The real impresspress block serves this endpoint; mirror the
-                // minimum shape here.
-                let path = msg.path().to_string();
-                let req_action = msg.header("req.action");
-                let retrieve_action = req_action == "retrieve" || msg.action() == "retrieve";
-                if retrieve_action && path == "/b/auth/api/me" {
-                    let cookie = msg.header("cookie");
-                    if let Some(user_id) = parse_session_cookie(cookie) {
-                        if let Some(email) = self.identities.get(&user_id) {
-                            // Flat {id, email, ...} shape — matches impresspress's
-                            // real /b/auth/api/me response (see
-                            // crates/impresspress-core/src/blocks/auth/handlers/me.rs).
-                            let body = serde_json::to_vec(&json!({
-                                "id": user_id,
-                                "email": email,
-                                "display_name": "",
-                                "role": "user",
-                                "orgs": []
-                            }))
-                            .unwrap();
-                            return OutputStream::respond(body);
-                        }
-                    }
-                    return OutputStream::error(WaferError::new(
-                        wafer_run::ErrorCode::Unauthenticated,
-                        "auth stub /b/auth/api/me: no session".to_string(),
-                    ));
-                }
-                OutputStream::error(WaferError::new(
-                    wafer_run::ErrorCode::NotFound,
-                    format!("wafer-run/auth stub: unhandled action {action}"),
-                ))
-            }
-        }
-    }
-}
-
-/// Parse a `session=<value>` token out of an RFC 6265 `Cookie` header.
-/// Returns `None` when the header is empty or no `session=...` segment is
-/// present. Extra cookies on the line are ignored.
-fn parse_session_cookie(raw: &str) -> Option<String> {
-    if raw.is_empty() {
-        return None;
-    }
-    for part in raw.split(';') {
-        let part = part.trim();
-        if let Some(v) = part.strip_prefix("session=") {
-            let v = v.trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Apply the admin block's migrations so `impresspress__admin__block_settings`
-/// exists before the registry block's `Init` runs `apply_if_blessed`, which
-/// upserts the registry's migration-state row into that table. Mirrors the
-/// production boot ordering (the admin block is registered/initialized first,
-/// creating the tracking table) and impresspress-core's `TestContext::with_admin`
-/// fixture. Without this, `apply_if_blessed`'s `write_state` fails the
-/// `block_settings create` INSERT against a non-existent table.
-async fn apply_admin_migrations(ctx: &InMemoryCtx) {
-    impresspress_core::blocks::admin::migrations::apply(ctx)
-        .await
-        .expect("apply admin migrations in site test fixture");
-}
-
-/// Construct the registry block with a minimal config and dispatch
-/// `LifecycleEvent::Init` against an in-memory context. Returns the context
-/// so the caller can query the seeded collections via `db::*`.
-pub async fn boot_registry_against_memory() -> Arc<InMemoryCtx> {
-    let ctx = Arc::new(InMemoryCtx::new());
-    apply_admin_migrations(ctx.as_ref()).await;
-
-    let cfg = RegistryConfig {
-        admin_email: "test@example.invalid".into(),
-        storage_key_prefix: "registry".into(),
-        jwt_secret: "test-secret".into(),
-        required_auth_method: String::new(),
-    };
+/// Build the runtime, register the registry block with `cfg`, and run its
+/// `Init` in the registry's own frame. Returns the registry-framed context
+/// and the block.
+async fn boot(cfg: RegistryConfig) -> (RegistryCtx, Arc<dyn Block>) {
+    let mut ctx = TestContext::with_auth().await.with_sign_in_added();
+    ctx.register_block(
+        "wafer-run/storage",
+        impresspress_core::blocks::storage::create(Arc::new(InMemoryStorageService::new())),
+    );
     let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
+    ctx.register_block(registry::NAME, block.clone());
+    ctx.add_deployment_grants(registry::auth::auth_table_grants());
+    let ctx = ctx.running_as(registry::NAME);
 
     block
         .lifecycle(
-            ctx.as_ref(),
+            &ctx,
             LifecycleEvent {
                 event_type: LifecycleType::Init,
                 data: Vec::new(),
@@ -321,10 +75,20 @@ pub async fn boot_registry_against_memory() -> Arc<InMemoryCtx> {
         )
         .await
         .expect("registry Init lifecycle seeds reserved orgs");
+    (ctx, block)
+}
 
-    let _: &str = registry::NAME;
-
-    ctx
+/// Construct the registry block with a minimal config and run its
+/// `LifecycleEvent::Init`. Returns the registry-framed context so the
+/// caller can query the seeded collections via `db::*`.
+pub async fn boot_registry_against_memory() -> Arc<RegistryCtx> {
+    let (ctx, _block) = boot(RegistryConfig {
+        admin_email: "test@example.invalid".into(),
+        storage_key_prefix: "registry".into(),
+        required_auth_method: String::new(),
+    })
+    .await;
+    Arc::new(ctx)
 }
 
 // -----------------------------------------------------------------------
@@ -377,7 +141,7 @@ impl TestApp {
 
 #[derive(Clone)]
 struct AppState {
-    ctx: Arc<InMemoryCtx>,
+    ctx: Arc<RegistryCtx>,
     block: Arc<dyn Block>,
 }
 
@@ -405,33 +169,14 @@ async fn dispatch(State(state): State<AppState>, req: Request) -> Response<Body>
 
 /// Start the registry block behind an ephemeral axum server. Shared setup
 /// for every `start_test_site_*` entry point.
-async fn start_with(
-    admin_email: &str,
-    identities: HashMap<String, String>,
-) -> (TestApp, Arc<InMemoryCtx>) {
-    let ctx = Arc::new(InMemoryCtx::new_with_identities(identities));
-    apply_admin_migrations(ctx.as_ref()).await;
-
-    let cfg = RegistryConfig {
+async fn start_with(admin_email: &str) -> (TestApp, Arc<RegistryCtx>) {
+    let (ctx, block) = boot(RegistryConfig {
         admin_email: admin_email.into(),
         storage_key_prefix: "registry".into(),
-        jwt_secret: "test-secret".into(),
         required_auth_method: String::new(),
-    };
-    let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
-
-    // Mirror `RegistryBlock::lifecycle(Init)` as run by the WAFER runtime's
-    // startup validation — seed the reserved orgs.
-    block
-        .lifecycle(
-            ctx.as_ref(),
-            LifecycleEvent {
-                event_type: LifecycleType::Init,
-                data: Vec::new(),
-            },
-        )
-        .await
-        .expect("registry Init lifecycle seeds reserved orgs");
+    })
+    .await;
+    let ctx = Arc::new(ctx);
 
     let state = AppState {
         ctx: ctx.clone(),
@@ -471,7 +216,7 @@ async fn start_with(
 /// seeded identity. Used by pre-existing Task 9/10 tests where the admin
 /// gate isn't exercised.
 pub async fn start_test_site() -> TestApp {
-    let (app, _ctx) = start_with("test@example.invalid", HashMap::new()).await;
+    let (app, _ctx) = start_with("test@example.invalid").await;
     app
 }
 
@@ -479,17 +224,15 @@ pub async fn start_test_site() -> TestApp {
 /// PAT stored in the registry's `TOKENS` collection and surfaced on
 /// [`TestApp::admin_token`].
 ///
-/// Flow: compute a `wafer_pat_<hex>`, insert its `(user_id, hash)` into
-/// `TOKENS` via the typed DB API (same path `exchange_cli_code` takes), and
-/// hand the raw token back to the caller. Requests carrying
+/// Flow: compute a `wafer_pat_<hex>`, insert its `(user_id, email, hash)`
+/// into `TOKENS` via the typed DB API (same path `exchange_cli_code` takes),
+/// and hand the raw token back to the caller. Requests carrying
 /// `Authorization: Bearer <admin_token>` resolve through
-/// `db::resolve_bearer` → `user_id` → stub's `user_profile` → `email`, so
-/// `require_admin`'s email check hits.
+/// `db::resolve_bearer` to the token row's email, so `require_admin`'s email
+/// check hits.
 pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
     let admin_id = "test-admin-id".to_string();
-    let mut identities = HashMap::new();
-    identities.insert(admin_id.clone(), admin_email.to_string());
-    let (mut app, ctx) = start_with(admin_email, identities).await;
+    let (mut app, ctx) = start_with(admin_email).await;
 
     let raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
     seed_token(ctx.as_ref(), &admin_id, admin_email, &raw).await;
@@ -497,29 +240,24 @@ pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
     app
 }
 
-/// Start the site with an admin identity seeded and the reqwest client
-/// configured to send `Cookie: session=admin-user-id` on every request.
+/// Start the site with an admin account signed in through impresspress's
+/// real login route, and the reqwest client sending its `auth_token` cookie
+/// on every request.
 ///
-/// Unlike [`start_test_site_with_admin`], this variant doesn't mint a PAT
-/// — the cookie is the credential, so `registry::auth::require_user`
-/// routes through the `wafer-run/auth` session branch rather than the
-/// PAT-lookup shortcut. That's the branch the admin actually hits in
-/// production when they open `/registry/cli-login` in a browser.
+/// Unlike [`start_test_site_with_admin`], this variant doesn't mint a PAT —
+/// the session cookie is the credential, so `registry::auth::require_user`
+/// takes the session-token branch rather than the PAT-lookup shortcut.
+/// That's the branch the admin actually hits in production when they open
+/// `/registry/cli-login` in a browser.
 pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
-    // Mint a signed JWT that `registry::auth::require_user` will verify
-    // against the configured jwt_secret ("test-secret" in the test harness;
-    // see the `TEST_JWT_SECRET` const below). Shape matches what impresspress
-    // puts on `auth_token` after OAuth — {sub, email, type:"access", exp}.
-    let admin_id = "admin-user-id".to_string();
-    let mut identities = HashMap::new();
-    identities.insert(admin_id.clone(), admin_email.to_string());
-    let (mut app, _ctx) = start_with(admin_email, identities).await;
+    let (mut app, ctx) = start_with(admin_email).await;
+    ctx.seed_account(admin_email, ADMIN_PASSWORD, "user").await;
+    let session = ctx.sign_in(admin_email, ADMIN_PASSWORD).await;
 
-    let jwt = sign_test_jwt(&admin_id, admin_email);
     let mut default_headers = reqwest::header::HeaderMap::new();
     default_headers.insert(
         reqwest::header::COOKIE,
-        reqwest::header::HeaderValue::from_str(&format!("auth_token={jwt}"))
+        reqwest::header::HeaderValue::from_str(&format!("auth_token={}", session.cookie))
             .expect("auth_token cookie header"),
     );
     app.client = reqwest::Client::builder()
@@ -529,31 +267,8 @@ pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
     app
 }
 
-/// Shared JWT secret the test harness configures on `RegistryConfig`.
-pub const TEST_JWT_SECRET: &str = "test-secret";
-
-/// Mint a JWT of the same shape impresspress's auth block issues on OAuth
-/// callback — signed with the block-derived key so `require_user`'s
-/// primary verification path succeeds.
-///
-/// Impresspress mints session tokens via `crypto::sign` in the
-/// `impresspress/auth-ui` block context, so the signing key is
-/// `HKDF(master_secret, AUTH_UI_BLOCK_ID)`. The verifier
-/// (`registry::auth::verify_jwt`) derives the same key, so the test must mint
-/// with `AUTH_UI_BLOCK_ID` to exercise the primary (derived-key) path.
-pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
-    use std::time::Duration;
-    use wafer_block_crypto::primitives::{derive_block_key, jwt_sign};
-    let mut claims = HashMap::new();
-    claims.insert("sub".to_string(), json!(user_id));
-    claims.insert("email".to_string(), json!(email));
-    claims.insert("type".to_string(), json!("access"));
-    let key = derive_block_key(
-        TEST_JWT_SECRET.as_bytes(),
-        impresspress_core::blocks::auth_ui::AUTH_UI_BLOCK_ID,
-    );
-    jwt_sign(claims, Duration::from_secs(3600), key.as_bytes()).expect("jwt_sign in test")
-}
+/// The password the cookie-session admin account signs in with.
+const ADMIN_PASSWORD: &str = "correct horse battery staple";
 
 /// Start the site with both an admin identity *and* a non-admin identity
 /// seeded. The admin's PAT ends up on `admin_token`; a separate PAT for
@@ -565,10 +280,7 @@ pub fn sign_test_jwt(user_id: &str, email: &str) -> String {
 pub async fn start_test_site_with_user(user_email: &str, admin_email: &str) -> TestApp {
     let admin_id = "test-admin-id".to_string();
     let user_id = "test-user-id".to_string();
-    let mut identities = HashMap::new();
-    identities.insert(admin_id.clone(), admin_email.to_string());
-    identities.insert(user_id.clone(), user_email.to_string());
-    let (mut app, ctx) = start_with(admin_email, identities).await;
+    let (mut app, ctx) = start_with(admin_email).await;
 
     let admin_raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
     seed_token(ctx.as_ref(), &admin_id, admin_email, &admin_raw).await;

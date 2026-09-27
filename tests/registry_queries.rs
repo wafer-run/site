@@ -16,7 +16,7 @@ use wafer_site::blocks::registry;
 /// Insert a package row under the `wafer-run` reserved org (seeded during
 /// block Init) and return the new row's ID.
 async fn create_pkg(
-    ctx: &common::InMemoryCtx,
+    ctx: &common::RegistryCtx,
     org_id: &str,
     name: &str,
     summary: &str,
@@ -36,7 +36,7 @@ async fn create_pkg(
 
 /// Insert a version row for the given package.
 async fn create_version(
-    ctx: &common::InMemoryCtx,
+    ctx: &common::RegistryCtx,
     package_id: &str,
     version: &str,
     published_at: i64,

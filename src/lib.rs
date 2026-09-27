@@ -23,19 +23,11 @@ pub mod flows;
 
 use std::{collections::HashMap, sync::Arc};
 
-#[cfg(feature = "target-native")]
-use impresspress_core::builder;
 use impresspress_core::builder::ImpresspressBuilder;
 use impresspress_core::features::BlockSettings;
 #[cfg(feature = "target-native")]
 use wafer_block_local_storage::service::LocalStorageService;
 use wafer_core::interfaces::storage::service::StorageService;
-
-#[cfg(feature = "target-native")]
-use impresspress_native::{
-    init_tracing, load_dotenv, register_http_listener, register_observability_hooks,
-    serve_until_shutdown, InfraConfig,
-};
 
 // ---------------------------------------------------------------------------
 // Shared registration helpers — used by both the native `run()` below and
@@ -112,17 +104,13 @@ pub fn register_post_build_for_site(
                     img-src 'self' data: blob: https:; \
                     font-src 'self' https:; \
                     connect-src 'self'; \
-                    frame-ancestors 'none'; \
                     base-uri 'self'; \
                     form-action 'self'"
         }),
     );
 
     // 4b. Registry block. See doc comment above re: soft-default behaviour.
-    let jwt_secret =
-        std::env::var(impresspress_core::blocks::auth::JWT_SECRET_KEY).unwrap_or_default();
     let registry_cfg = crate::blocks::registry::RegistryConfig {
-        jwt_secret,
         admin_email: std::env::var("WAFER_RUN__REGISTRY__ADMIN_EMAIL").unwrap_or_default(),
         storage_key_prefix: std::env::var("WAFER_RUN__REGISTRY__STORAGE_KEY_PREFIX")
             .unwrap_or_else(|_| "registry".into()),
@@ -181,123 +169,37 @@ fn block_settings_for_site() -> BlockSettings {
 
 /// Run the site (native target).
 ///
-/// Composition order:
+/// The boot is impresspress's own native server
+/// ([`impresspress_server::run`]): `.env` and tracing, the `IMPRESSPRESS_*`
+/// infrastructure config, the platform services, the variables and
+/// block-settings tables, `build()`, the admin-first boot and the HTTP
+/// listener. The site adds itself through the same two hooks the Cloudflare
+/// entry passes to `impresspress_cloudflare::run` — [`register_blocks_for_site`]
+/// and [`register_post_build_for_site`] — and points the listener at the
+/// `wafer-site-main` flow.
 ///
-/// 1. Load `.env`, init tracing.
-/// 2. Read `IMPRESSPRESS_*` infra config via [`InfraConfig::from_env`].
-/// 3. Build the WAFER runtime via [`ImpresspressBuilder`] + the shared
-///    [`register_blocks_for_site`] pre-build hook.
-/// 4. Call the shared [`register_post_build_for_site`] hook (registers
-///    site content, registry, inspector + security-headers overrides,
-///    `wafer-site-main` flow).
-/// 6. Native-only wiring: HTTP listener + observability + start +
-///    `builder::post_start` + serve until shutdown.
+/// The content block reads the site's assets from a LocalStorage rooted at
+/// `<repo>/dist`, separate from impresspress's platform storage (rooted at
+/// `IMPRESSPRESS_STORAGE_ROOT`) so the two key namespaces don't collide.
 #[cfg(feature = "target-native")]
 pub async fn run() -> anyhow::Result<()> {
-    use anyhow::Context as _;
-
-    // 1. Load `.env` + tracing. Anchor `.env` lookup to the current dir
-    //    so `cargo run` from the repo root picks it up; impresspress-cli does
-    //    the same with its `repo_root`.
-    load_dotenv(std::path::Path::new("."));
-    let log_format = std::env::var("IMPRESSPRESS_LOG_FORMAT").unwrap_or_else(|_| "text".into());
-    init_tracing(&log_format).context("initialize tracing subscriber")?;
-    tracing::info!("wafer-site starting (impresspress + WAFER runtime)");
-
-    // 2. Infrastructure config (IMPRESSPRESS_*).
-    let infra = InfraConfig::from_env();
-    tracing::info!(
-        listen = %infra.listen,
-        db_path = %infra.db_path,
-        storage_root = %infra.storage_root,
-        "infrastructure config loaded"
+    let dist_root = format!("{}/dist", env!("CARGO_MANIFEST_DIR"));
+    let content_storage: Arc<dyn StorageService> = Arc::new(
+        LocalStorageService::new(&dist_root)
+            .map_err(|e| anyhow::anyhow!("LocalStorageService::new({dist_root}): {e:?}"))?,
     );
-
-    // Ensure the database parent and storage root exist before anything
-    // tries to open them.
-    if let Some(parent) = std::path::Path::new(&infra.db_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-    std::fs::create_dir_all(&infra.storage_root)?;
-
-    // 3. Build the WAFER runtime via the shared pre-build hook.
-    let db = impresspress_native::make_sqlite_database_service(&infra.db_path)
-        .context("create sqlite database service")?;
-    let storage = impresspress_native::make_local_storage_service(&infra.storage_root)
-        .context("create local storage service")?;
-    let jwt_secret = std::env::var(impresspress_core::blocks::auth::JWT_SECRET_KEY)
-        .expect("WAFER_RUN__AUTH__JWT_SECRET required");
-    let crypto = impresspress_native::make_jwt_crypto_service(jwt_secret)
-        .context("create jwt crypto service")?;
-    let builder = ImpresspressBuilder::new()
-        .database(db)
-        .storage(storage)
-        .config(Arc::new(
-            wafer_core::service_blocks::config::EnvConfigService::new(),
-        ))
-        .crypto(crypto)
-        .network(impresspress_native::make_fetch_network_service())
-        .logger(impresspress_native::make_tracing_logger())
-        .config_source(Arc::new(
-            impresspress_core::config_source::EnvConfigSource::new(),
-        ))
-        .sqlite_db_path(&infra.db_path);
-    let builder = register_blocks_for_site(builder)
-        .map_err(|e| anyhow::anyhow!("register_blocks_for_site: {e}"))?;
-    let (mut wafer, storage_block) = builder
-        .build()
-        .map_err(|e| anyhow::anyhow!("failed to build impresspress runtime: {e}"))?;
-
-    // 4-5. Shared post-build hooks. The content block reads from a
-    //     LocalStorage rooted at <repo>/dist; this is separate from
-    //     impresspress's main storage (rooted at infra.storage_root) so the
-    //     two key namespaces don't collide.
-    let content_storage: Arc<dyn StorageService> = {
-        let dist_root = format!("{}/dist", env!("CARGO_MANIFEST_DIR"));
-        Arc::new(
-            LocalStorageService::new(&dist_root)
-                .map_err(|e| anyhow::anyhow!("LocalStorageService::new({dist_root}): {e:?}"))?,
-        )
-    };
-    register_post_build_for_site(&mut wafer, content_storage)
-        .map_err(|e| anyhow::anyhow!("register_post_build_for_site: {e}"))?;
-
-    // 6. Native-only wiring: HTTP listener + observability + boot.
-    register_http_listener(&mut wafer, &infra.listen, "wafer-site-main");
-    register_observability_hooks(&mut wafer);
-
-    // Boot through the shared funnel (seal → init_block(admin) →
-    // init_all_blocks → post_start), then run the native-only Start
-    // lifecycle + socket bind — the same sequence as impresspress's native
-    // server. Admin-first init guarantees admin's migrations create
-    // `impresspress__admin__block_settings` before any other block's Init
-    // writes its migration state there; the previous plain `start()` left
-    // init order to HashMap iteration and llm/registry could permanent-fail
-    // on the missing table on a fresh database. The site seeds its config
-    // from env pre-build (like native impresspress), so the seed hook is a no-op.
-    struct SiteBootHooks;
-
-    #[wafer_block::wafer_async_trait]
-    impl builder::BootHooks for SiteBootHooks {
-        async fn seed_after_admin_init(&self, _wafer: &wafer_run::Wafer) -> Result<(), String> {
-            Ok(())
-        }
-    }
-
-    builder::boot(&mut wafer, &storage_block, &SiteBootHooks)
-        .await
-        .map_err(|e| anyhow::anyhow!("failed to boot WAFER runtime: {e}"))?;
-    wafer.run_start_lifecycle().await;
-    let wafer = wafer.bind_all();
-    tracing::info!(listen = %infra.listen, "wafer-site listening");
-
-    serve_until_shutdown(&wafer)
-        .await
-        .context("await shutdown signal")?;
-    tracing::info!("wafer-site shutdown complete");
-    Ok(())
+    impresspress_server::run(
+        std::path::Path::new("."),
+        false,
+        flows::site::FLOW_ID,
+        impresspress_server::AppHooks {
+            register_blocks: Box::new(register_blocks_for_site),
+            register_post_build: Box::new(move |wafer, _platform_storage| {
+                register_post_build_for_site(wafer, content_storage)
+            }),
+        },
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------

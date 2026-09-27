@@ -51,7 +51,7 @@ pub async fn post(
     // 2. Multipart parse.
     let bytes = match read_multipart_tarball(msg, input).await {
         Ok(b) => b,
-        Err(status) => return multipart_error(status),
+        Err(out) => return out,
     };
 
     // 3. Tarball parse + validate.
@@ -181,19 +181,26 @@ fn multipart_error(status: u16) -> OutputStream {
 /// `reqwest::multipart::Form` (which we ship in the CLI and use in tests).
 /// Part ordering is flexible; only the part whose `Content-Disposition`
 /// says `name="tarball"` is returned. Preamble and epilogue are ignored.
-async fn read_multipart_tarball(msg: &Message, input: InputStream) -> Result<Vec<u8>, u16> {
+/// A body stream that fails before arriving whole answers with its error.
+async fn read_multipart_tarball(
+    msg: &Message,
+    input: InputStream,
+) -> Result<Vec<u8>, OutputStream> {
     let content_type = msg.header("content-type");
     if !content_type
         .to_ascii_lowercase()
         .starts_with("multipart/form-data")
     {
-        return Err(400);
+        return Err(multipart_error(400));
     }
-    let boundary = extract_boundary(content_type).ok_or(400u16)?;
+    let boundary = extract_boundary(content_type).ok_or_else(|| multipart_error(400))?;
 
-    let body = input.collect_to_bytes().await;
+    let body = input
+        .collect_to_bytes()
+        .await
+        .map_err(OutputStream::error)?;
     if body.len() > MAX_PUBLISH_BODY_BYTES {
-        return Err(413);
+        return Err(multipart_error(413));
     }
 
     let dash_boundary = format!("--{boundary}");
@@ -217,7 +224,7 @@ async fn read_multipart_tarball(msg: &Message, input: InputStream) -> Result<Vec
         let body = body.strip_suffix(b"\r\n").unwrap_or(body);
         return Ok(body.to_vec());
     }
-    Err(400)
+    Err(multipart_error(400))
 }
 
 /// Pull the `boundary=...` token out of a `Content-Type` header. Strips a

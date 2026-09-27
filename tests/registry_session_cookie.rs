@@ -1,16 +1,9 @@
 //! Exercises the session-cookie branch of `registry::auth::require_user`.
 //!
-//! The pre-existing HTTP-integration tests authenticate via Bearer PAT —
-//! that path bypasses the `wafer-run/auth` fallback entirely. This test
-//! covers the other branch: no PAT, cookie only, round-tripped through
-//! the auth stub's `AUTH_REQUIRE_USER` + `AUTH_USER_PROFILE` calls so the
-//! admin-email match lands end-to-end.
-//!
-//! The stub (see `tests/common/mod.rs::handle_auth_stub`) recognizes
-//! `Cookie: session=<user_id>` when `<user_id>` is in the identity map
-//! and answers `{"user_id": "<user_id>"}`. `AUTH_USER_PROFILE` then
-//! returns the seeded email, and `require_admin`'s case-insensitive
-//! email compare admits the request.
+//! The pre-existing HTTP-integration tests authenticate via Bearer PAT.
+//! This test covers the other branch: no PAT, only the `auth_token` cookie
+//! impresspress's real login route set, checked by impresspress's token
+//! verifier so the admin-email match lands end-to-end.
 
 mod common;
 

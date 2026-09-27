@@ -32,10 +32,12 @@ impl Block for RegistryBlock {
         BlockInfo::new(NAME, "0.1.0", "http-handler@v1", "WAFER package registry")
             .instance_mode(InstanceMode::Singleton)
             .category(BlockCategory::Infrastructure)
+            // `wafer-run/config`: the migration dialect and the token
+            // issuer (`crypto::expected_issuer`) are read through it.
             .requires(vec![
                 "wafer-run/database".into(),
                 "wafer-run/storage".into(),
-                "wafer-run/auth".into(),
+                "wafer-run/config".into(),
             ])
             .collections(vec![
                 CollectionSchema::new(db::ORGS)

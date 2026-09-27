@@ -1,12 +1,16 @@
 //! `wafer-site-main` flow definition + route table.
 //!
 //! Middleware chain mirrors impresspress's `site-main`; only the router target
-//! table differs. The flow is served by `register_http_listener(...,
-//! "wafer-site-main")` in [`crate::run`].
+//! table differs. The native HTTP listener dispatches to [`FLOW_ID`] (see
+//! [`crate::run`]).
+
+/// The flow's id: the flow the HTTP listener dispatches every request to.
+pub const FLOW_ID: &str = "wafer-site-main";
 
 /// Flow JSON registered via `wafer.add_flow_json`. Identical middleware
-/// pipeline to impresspress's `site-main` — we just own the ID so the HTTP
-/// listener targets the right set of routes.
+/// pipeline to impresspress's `site-main`
+/// (`impresspress_core::flows::site_main::JSON`) — we just own the ID so the
+/// HTTP listener targets the right set of routes.
 pub const JSON: &str = r#"{
     "id": "wafer-site-main",
     "name": "WAFER Site Main",
@@ -16,6 +20,7 @@ pub const JSON: &str = r#"{
         { "id": "security-headers", "block": "wafer-run/security-headers" },
         { "id": "cors",             "block": "wafer-run/cors" },
         { "id": "readonly-guard",   "block": "wafer-run/readonly-guard" },
+        { "id": "body-limit",       "block": "impresspress/body-limit" },
         { "id": "router",           "block": "wafer-run/router" }
     ],
     "config": { "on_error": "stop" }
@@ -55,4 +60,39 @@ pub fn routes() -> serde_json::Value {
         // `$CARGO_MANIFEST_DIR/dist`.
         { "path": "/**", "block": "wafer-site/content" }
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_flow_json_carries_flow_id() {
+        let flow: serde_json::Value = serde_json::from_str(JSON).expect("the flow is JSON");
+        assert_eq!(flow["id"], FLOW_ID);
+    }
+
+    /// The middleware chain is impresspress's `site-main` chain, step for
+    /// step; only the router's route table differs.
+    #[test]
+    fn the_middleware_chain_is_impresspress_site_main() {
+        let steps = |json: &str| -> Vec<(String, String)> {
+            let flow: serde_json::Value = serde_json::from_str(json).expect("the flow is JSON");
+            flow["steps"]
+                .as_array()
+                .expect("steps")
+                .iter()
+                .map(|s| {
+                    (
+                        s["id"].as_str().unwrap_or_default().to_string(),
+                        s["block"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            steps(JSON),
+            steps(impresspress_core::flows::site_main::JSON)
+        );
+    }
 }

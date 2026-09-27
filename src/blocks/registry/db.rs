@@ -188,7 +188,7 @@ pub async fn latest_version_for(ctx: &dyn Context, package_id: &str) -> Result<O
         }],
         // Small limit — a package's full version list tops out in the tens;
         // we only need to walk to the first non-yanked row.
-        limit: 100,
+        limit: Some(100),
         offset: 0,
         skip_count: false,
         ..Default::default()
@@ -210,7 +210,7 @@ pub async fn list_packages(
     ctx: &dyn Context,
     query: Option<&str>,
     page: i64,
-    per_page: i64,
+    per_page: u32,
 ) -> Result<(Vec<PackageSummary>, i64)> {
     let mut pkg_filters: Vec<Filter> = Vec::new();
     if let Some(q) = query.filter(|q| !q.is_empty()) {
@@ -220,7 +220,7 @@ pub async fn list_packages(
             value: json!(format!("%{q}%")),
         });
     }
-    let offset = (page - 1).max(0) * per_page;
+    let offset = (page - 1).max(0).saturating_mul(i64::from(per_page));
 
     let total = db::count(ctx, PACKAGES, &pkg_filters)
         .await
@@ -232,7 +232,7 @@ pub async fn list_packages(
             field: "created_at".into(),
             desc: true,
         }],
-        limit: per_page,
+        limit: Some(per_page),
         offset,
         skip_count: false,
         ..Default::default()

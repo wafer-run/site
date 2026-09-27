@@ -72,7 +72,10 @@ pub async fn exchange(
     input: InputStream,
     _cfg: &RegistryConfig,
 ) -> OutputStream {
-    let body_bytes = input.collect_to_bytes().await;
+    let body_bytes = match input.collect_to_bytes().await {
+        Ok(bytes) => bytes,
+        Err(e) => return OutputStream::error(e),
+    };
     let parsed: ExchangeRequest = match serde_json::from_slice(&body_bytes) {
         Ok(v) => v,
         Err(_) => return resp::bad_request("body must be JSON with a `code` field"),

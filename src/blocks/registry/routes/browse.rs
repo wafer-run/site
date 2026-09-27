@@ -35,7 +35,7 @@ pub async fn search(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> 
             raw.parse().unwrap_or(1)
         }
     };
-    let per_page: i64 = 20;
+    let per_page: u32 = 20;
 
     match db::list_packages(ctx, q, page, per_page).await {
         Ok((packages, total)) => resp::ok_json(&serde_json::json!({

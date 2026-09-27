@@ -4,18 +4,23 @@
 //!
 //! - [`require_user`] — resolve the caller to an `AuthedUser` by checking a
 //!   Bearer PAT against `registry_tokens` first, then falling back to
-//!   verifying a impresspress-issued JWT (Bearer header or `auth_token` cookie).
+//!   impresspress's verifier for its session token (Bearer header or
+//!   `auth_token` cookie).
 //! - [`require_admin`] — wraps `require_user` and additionally gates on the
 //!   configured admin email. Non-admins get the "coming-soon" response.
 //!
 //! No raw SQL is used: the PAT lookup goes through
 //! `wafer_core::clients::database::get_by_field`.
 
+use impresspress_core::{
+    blocks::auth::{
+        repo::{jwt_blocklist, users},
+        JWT_SECRET_KEY,
+    },
+    crypto::{expected_issuer, verify_access_token},
+};
 use wafer_block::Message;
-use wafer_block_crypto::primitives::{derive_block_key, jwt_verify, JwtExpPolicy};
-use wafer_run::{context::Context, OutputStream};
-
-use impresspress_core::blocks::auth_ui::AUTH_UI_BLOCK_ID;
+use wafer_run::{context::Context, OutputStream, ResourceGrant};
 
 use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
 
@@ -48,19 +53,21 @@ pub struct AuthedUser {
 ///    with a `revoked_at` set) are skipped and we fall through to step 2.
 ///    This path exists because PATs are minted by
 ///    `POST /registry/api/cli-login/exchange` and live only in the
-///    registry's own store — `wafer-run/auth` doesn't know about them.
-/// 2. Delegate to `wafer-run/auth` via `AUTH_REQUIRE_USER`. The session
-///    cookie (and Authorization header, for impresspress-managed PATs) ride on
-///    `http.header.*` meta keys — same convention
-///    `wafer-run/http-listener` uses.
+///    registry's own store — impresspress's auth doesn't know about them.
+/// 2. An impresspress session token — the `Authorization: Bearer` header or
+///    the `auth_token` cookie impresspress's login sets — checked by
+///    [`verify_access_token`], impresspress's one token verifier, under the
+///    deployment's own policy: the secret from the config snapshot and the
+///    issuer [`expected_issuer`] resolves. `/registry/**` is routed straight
+///    from the site flow rather than through `impresspress/router`, so the
+///    registry runs the check itself; the reads it makes are covered by
+///    [`auth_table_grants`].
 ///
 /// Returns an `OutputStream` error response on any failure path so callers
-/// can early-return without additional shaping.
-pub async fn require_user(
-    ctx: &dyn Context,
-    msg: &Message,
-    cfg: &RegistryConfig,
-) -> Result<AuthedUser, OutputStream> {
+/// can early-return without additional shaping. A check that could not be
+/// completed (a failed blocklist or `auth_version` read) answers with its
+/// error rather than as signed out.
+pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser, OutputStream> {
     // 1. Try bearer PAT against registry_tokens. This path handles PATs the
     //    registry itself issued via CLI-login exchange. The PAT inherits the
     //    auth method of the session that minted it — for now we tag it
@@ -75,46 +82,45 @@ pub async fn require_user(
                 auth_method: "pat".to_string(),
             });
         }
-        // Fall through to JWT verification — a mismatched PAT might be a
-        // impresspress-minted JWT.
+        // Fall through to session-token verification — a PAT that is not
+        // ours might be an impresspress access token.
     }
 
-    // 2. Try impresspress's JWT. Impresspress's OAuth callback sets the signed JWT
-    //    as `auth_token` cookie (or passes it as `Authorization: Bearer`).
-    //    Impresspress's runtime router does JWT verification transparently for
-    //    `/b/**` routes via `extract_auth_meta`, but our `/registry/**` flow
-    //    bypasses the router, so we verify here. Uses impresspress's own crypto
-    //    helpers to stay consistent with the signing key derivation.
-    let jwt_token = find_jwt_token(msg);
-    if let Some(token) = jwt_token {
-        if let Some(claims) = verify_jwt(&token, &cfg.jwt_secret) {
-            let sub = claims
-                .get("sub")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let email = claims
-                .get("email")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let auth_method = claims
-                .get("auth_method")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            if !sub.is_empty() {
-                return Ok(AuthedUser {
-                    id: sub.to_string(),
-                    email: email.to_string(),
-                    auth_method: auth_method.to_string(),
-                });
-            }
-        }
+    // 2. An impresspress session token.
+    let Some(token) = find_jwt_token(msg) else {
+        return Err(unauthorized_response());
+    };
+    let secret = ctx.config_get(JWT_SECRET_KEY).unwrap_or("").to_string();
+    let issuer = expected_issuer(ctx).await.map_err(OutputStream::error)?;
+    let claims = verify_access_token(ctx, &token, &secret, &issuer)
+        .await
+        .map_err(OutputStream::error)?;
+    match claims {
+        Some(claims) => match claims.sub.filter(|sub| !sub.is_empty()) {
+            Some(id) => Ok(AuthedUser {
+                id,
+                email: claims.email.unwrap_or_default(),
+                auth_method: claims.auth_method,
+            }),
+            None => Err(unauthorized_response()),
+        },
+        None => Err(unauthorized_response()),
     }
-
-    Err(unauthorized_response())
 }
 
-/// Find a JWT in the request — either the Authorization Bearer header or
-/// the `auth_token` cookie that impresspress's OAuth callback sets.
+/// The reads [`verify_access_token`] makes, granted to the registry block:
+/// the JWT blocklist (a logged-out token) and the users table (a token
+/// minted before the user's `auth_version` moved). The same two reads the
+/// `impresspress/router` block is granted for the same check.
+pub fn auth_table_grants() -> Vec<ResourceGrant> {
+    vec![
+        ResourceGrant::read(super::NAME, jwt_blocklist::TABLE),
+        ResourceGrant::read(super::NAME, users::TABLE),
+    ]
+}
+
+/// Find a session token in the request — either the Authorization Bearer
+/// header or the `auth_token` cookie impresspress's login sets.
 fn find_jwt_token(msg: &Message) -> Option<String> {
     let auth_header = msg.header("authorization");
     if let Some(t) = auth_header.strip_prefix("Bearer ") {
@@ -122,51 +128,8 @@ fn find_jwt_token(msg: &Message) -> Option<String> {
             return Some(t.to_string());
         }
     }
-    let cookie = msg.header("cookie");
-    for part in cookie.split(';') {
-        if let Some(v) = part.trim().strip_prefix("auth_token=") {
-            let v = v.trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Verify a JWT against impresspress's auth-block derived key, with fallback to
-/// the master secret. Mirrors `impresspress_core::crypto::extract_auth_meta`
-/// except we return the claims map instead of mutating message meta.
-///
-/// Session tokens (access + refresh) are minted via `crypto::sign` in the
-/// `impresspress/auth-ui` block context — login, signup, refresh, and the
-/// oauth callback all dispatch in that block, and the crypto handler routes
-/// `CRYPTO_SIGN` through `sign_for(caller_id, ...)`. So the verify key is
-/// `HKDF-SHA256(master_secret, "wafer-jwt|impresspress/auth-ui")`, derived from
-/// [`AUTH_UI_BLOCK_ID`] — the same block id impresspress's own `extract_auth_meta`
-/// uses (see impresspress #155/#204). The block id is taken from the
-/// `impresspress_core` constant rather than hardcoded so site tracks impresspress's
-/// single source of truth for which block signs.
-///
-/// Falls back to verifying against the raw master secret for tokens minted
-/// without block derivation (e.g. unit-test fixtures), matching the fallback
-/// branch in `extract_auth_meta`.
-fn verify_jwt(
-    token: &str,
-    jwt_secret: &str,
-) -> Option<std::collections::HashMap<String, serde_json::Value>> {
-    let derived = derive_block_key(jwt_secret.as_bytes(), AUTH_UI_BLOCK_ID);
-    if let Ok(claims) = jwt_verify(token, derived.as_bytes(), JwtExpPolicy::Required) {
-        if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
-            return Some(claims);
-        }
-    }
-    if let Ok(claims) = jwt_verify(token, jwt_secret.as_bytes(), JwtExpPolicy::Required) {
-        if claims.get("type").and_then(|v| v.as_str()).unwrap_or("") != "refresh" {
-            return Some(claims);
-        }
-    }
-    None
+    let cookie = msg.cookie("auth_token");
+    (!cookie.is_empty()).then(|| cookie.to_string())
 }
 
 /// Gate on the configured admin email — and, when configured, the auth
@@ -186,7 +149,7 @@ pub async fn require_admin(
     msg: &Message,
     cfg: &RegistryConfig,
 ) -> Result<AuthedUser, OutputStream> {
-    let user = require_user(ctx, msg, cfg).await?;
+    let user = require_user(ctx, msg).await?;
     let is_admin_email =
         !user.email.is_empty() && user.email.eq_ignore_ascii_case(&cfg.admin_email);
     if !is_admin_email {

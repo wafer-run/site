@@ -29,13 +29,6 @@ pub struct RegistryConfig {
     /// `"registry"`.
     pub storage_key_prefix: String,
 
-    /// Shared JWT secret — same value impresspress's auth block uses to mint
-    /// OAuth JWTs. Needed so `require_user` can verify `auth_token` cookies
-    /// end-to-end. Impresspress's runtime router does this transparently for
-    /// `/b/**` routes, but `/registry/**` is routed directly from our
-    /// site-main flow and bypasses that middleware.
-    pub jwt_secret: String,
-
     /// If non-empty, admin-gated routes additionally require the JWT's
     /// `auth_method` claim to match this value (e.g. `"oauth.github"`).
     /// Empty disables the check (any impresspress-authenticated admin email
@@ -58,5 +51,7 @@ pub fn register(w: &mut Wafer, cfg: RegistryConfig) -> anyhow::Result<()> {
     );
     let block = Arc::new(handlers::RegistryBlock::new(cfg));
     w.register_block(NAME, block)
-        .map_err(|e| anyhow::anyhow!("register {NAME}: {e}"))
+        .map_err(|e| anyhow::anyhow!("register {NAME}: {e}"))?;
+    w.add_wrap_grants(auth::auth_table_grants())
+        .map_err(|e| anyhow::anyhow!("grant {NAME} the session-token reads: {e}"))
 }
