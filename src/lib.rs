@@ -183,23 +183,34 @@ fn block_settings_for_site() -> BlockSettings {
 /// `IMPRESSPRESS_STORAGE_ROOT`) so the two key namespaces don't collide.
 #[cfg(feature = "target-native")]
 pub async fn run() -> anyhow::Result<()> {
+    impresspress_server::run(
+        std::path::Path::new("."),
+        false,
+        flows::site::FLOW_ID,
+        native_app_hooks()?,
+    )
+    .await
+}
+
+/// The hooks [`run`] hands impresspress's native boot: the site's blocks,
+/// configs and flow, with the content block reading from `<repo>/dist`.
+///
+/// Public so the integration tests boot the runtime the binary serves
+/// (`impresspress_server::start_native` with these hooks and
+/// [`flows::site::FLOW_ID`]) rather than a hand-assembled copy of it.
+#[cfg(feature = "target-native")]
+pub fn native_app_hooks() -> anyhow::Result<impresspress_server::AppHooks> {
     let dist_root = format!("{}/dist", env!("CARGO_MANIFEST_DIR"));
     let content_storage: Arc<dyn StorageService> = Arc::new(
         LocalStorageService::new(&dist_root)
             .map_err(|e| anyhow::anyhow!("LocalStorageService::new({dist_root}): {e:?}"))?,
     );
-    impresspress_server::run(
-        std::path::Path::new("."),
-        false,
-        flows::site::FLOW_ID,
-        impresspress_server::AppHooks {
-            register_blocks: Box::new(register_blocks_for_site),
-            register_post_build: Box::new(move |wafer, _platform_storage| {
-                register_post_build_for_site(wafer, content_storage)
-            }),
-        },
-    )
-    .await
+    Ok(impresspress_server::AppHooks {
+        register_blocks: Box::new(register_blocks_for_site),
+        register_post_build: Box::new(move |wafer, _platform_storage| {
+            register_post_build_for_site(wafer, content_storage)
+        }),
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -98,6 +98,11 @@ jsonschema                 = { version = "0.58", default-features = false }
 axum = "0.8"
 # The HTTP-level registry tests drive the test server with it.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+# tests/registry_csrf.rs boots the binary's own runtime
+# (`impresspress_server::start_native` over `native_app_hooks`) on a temp
+# SQLite database and storage root.
+impresspress-native        = { path = "../impresspress/crates/impresspress-native" }
+tempfile = "3"
 
 [lints.clippy]
 redundant_clone = "warn"
