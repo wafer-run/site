@@ -39,9 +39,12 @@ pub fn routes() -> serde_json::Value {
         { "path": "/_inspector",    "block": "wafer-run/inspector" },
 
         // Package registry — `wafer-run/registry` (publish, yank, download,
-        // browse, CLI login). Registered by `crate::blocks::registry`.
-        { "path": "/registry/**", "block": "wafer-run/registry" },
-        { "path": "/registry",    "block": "wafer-run/registry" },
+        // browse, CLI login), reached through `impresspress/router` so its
+        // requests get impresspress's pipeline (the CSRF origin policy, the
+        // audit log). The router's route to the block is registered in
+        // `crate::register_blocks_for_site`.
+        { "path": "/registry/**", "block": "impresspress/router" },
+        { "path": "/registry",    "block": "impresspress/router" },
 
         // Deploy-time config validation endpoint. Returns 200 when every
         // block's required `ConfigVar`s have a value or a default; 503
