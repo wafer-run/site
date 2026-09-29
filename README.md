@@ -2,7 +2,7 @@
 
 The website, docs, playground, and package registry behind [wafer.run](https://wafer.run).
 
-Built on [WAFER](https://github.com/wafer-run/wafer-run) + [impresspress](https://github.com/Jsuppers/impresspress) — both must be checked out as siblings (path deps in `Cargo.toml`), at the commits `.github/workflows/ci.yml` pins (`WAFER_RUN_REF`, `IMPRESSPRESS_REF`):
+Built on [WAFER](https://github.com/wafer-run/wafer-run) + [impresspress](https://github.com/impresspress/impresspress) — both must be checked out as siblings (path deps in `Cargo.toml`), at the commits `.github/workflows/ci.yml` pins (`WAFER_RUN_REF`, `IMPRESSPRESS_REF`):
 
 ```
 workspace/
