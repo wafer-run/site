@@ -25,7 +25,7 @@
 use serde_json::json;
 use wafer_run::{Context, InputStream, Message, OutputStream};
 
-use crate::blocks::registry::{auth, config, db, routes::resp, tarball};
+use crate::blocks::registry::{auth, db, routes::resp, tarball, STORAGE_FOLDER};
 
 /// Cap on total body size accepted by `POST /registry/api/publish`. Matches
 /// the 20 MiB archive cap — the multipart envelope adds a few hundred bytes
@@ -104,23 +104,18 @@ pub async fn post(ctx: &dyn Context, msg: &Message, input: InputStream) -> Outpu
         Err(e) => return resp::internal(&format!("upsert_org: {e}")),
     };
 
-    // 6. Storage write. Folder is the configured prefix ("registry" by
-    //    default). We don't proactively `create_folder` here — the storage
-    //    block's `put` is responsible for auto-creating the folder in
-    //    backends that need it. The local-storage backend used in dev +
-    //    tests creates directories on demand.
+    // 6. Storage write, into `STORAGE_FOLDER`. We don't proactively
+    //    `create_folder` here — the storage block's `put` is responsible
+    //    for auto-creating the folder in backends that need it. The
+    //    local-storage backend used in dev + tests creates directories on
+    //    demand.
     let storage_key = format!(
         "{}/{}/{}.wafer",
         t.wafer_toml.package.org, t.wafer_toml.package.name, t.wafer_toml.package.version
     );
-    let folder = match config::storage_key_prefix(ctx).await {
-        Ok(folder) => folder,
-        Err(e) => return OutputStream::error(e),
-    };
-
     if let Err(e) = wafer_core::clients::storage::put(
         ctx,
-        &folder,
+        STORAGE_FOLDER,
         &storage_key,
         &bytes,
         "application/octet-stream",
@@ -141,7 +136,7 @@ pub async fn post(ctx: &dyn Context, msg: &Message, input: InputStream) -> Outpu
     )
     .await
     {
-        let _ = wafer_core::clients::storage::delete(ctx, &folder, &storage_key).await;
+        let _ = wafer_core::clients::storage::delete(ctx, STORAGE_FOLDER, &storage_key).await;
         return resp::internal(&format!("db insert: {e}"));
     }
 

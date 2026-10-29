@@ -7,7 +7,7 @@ use wafer_run::{
     LifecycleType, Message, OutputStream, WaferError,
 };
 
-use crate::blocks::registry::{config, db, migrations, routes, NAME};
+use crate::blocks::registry::{config, db, migrations, routes, NAME, STORAGE_FOLDER};
 
 /// The registry block. Stateless: its config is read per request through the
 /// config service (see [`config`]).
@@ -145,13 +145,14 @@ impl Block for RegistryBlock {
             // Pre-create the storage folder so the first publish doesn't
             // race on folder creation. Safe on re-run — the helper
             // tolerates "already exists" from every backend we care about.
-            let folder = config::storage_key_prefix(ctx).await?;
-            db::ensure_storage_folder(ctx, &folder).await.map_err(|e| {
-                WaferError::new(
-                    wafer_run::ErrorCode::Internal,
-                    format!("registry storage folder: {e}"),
-                )
-            })?;
+            db::ensure_storage_folder(ctx, STORAGE_FOLDER)
+                .await
+                .map_err(|e| {
+                    WaferError::new(
+                        wafer_run::ErrorCode::Internal,
+                        format!("registry storage folder: {e}"),
+                    )
+                })?;
         }
         Ok(())
     }

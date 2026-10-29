@@ -69,7 +69,7 @@ On Cloudflare every setting is a row of D1's variables table, and only an admin 
    ```
 2. Deploy. The first `/_deploy/prepare` stores the token's hash for 24 hours.
 3. Redeem it within those 24 hours: open `https://wafer.run/b/auth/bootstrap`, paste the token, and choose an email you own and a password (the form posts to `/b/auth/api/bootstrap`, which creates the admin and signs you in).
-4. Delete the secret: `npx wrangler@4 secret delete WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_TOKEN --name wafer-site`.
+4. Delete the secret: `npx wrangler@4 secret delete WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_TOKEN --name wafer-site`. This stops the token being installed again on a fresh database; it does **not** revoke a token already installed. Until it is redeemed (or its 24 hours run out), the stored token is itself an admin credential — the auth block accepts it as a bearer for admin routes — so treat it as an admin password, redeem it promptly, and never delete the secret instead of redeeming.
 5. Signed in as that admin, on the Variables page:
    - `WAFER_RUN_SHARED__FRONTEND_URL` = `https://wafer.run` (it is the access-token issuer, so everyone signs in again);
    - `WAFER_RUN_SHARED__ALLOW_SIGNUP` = `false` (seeded `true`);

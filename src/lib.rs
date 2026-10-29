@@ -154,10 +154,14 @@ pub fn register_post_build_for_site(
 ///
 /// `BlockSettings` is consumed by `ImpresspressRouterBlock`: when a block is
 /// disabled here, requests to `/b/{block}/**` 404 instead of dispatching.
-/// The blocks are still registered statically (every impresspress feature
-/// block self-registers via `register_static_block!`) and their required
-/// config is still validated at start, so this is purely a routing/UX
-/// concern — not a way to suppress missing-config errors.
+/// Most of these blocks are not compiled into the site at all: each is
+/// behind an impresspress-core `block-*` feature, and the Cloudflare build
+/// enables none of them. The native build's `impresspress-core/llm` brings
+/// `impresspress/llm` and `impresspress/messages` in, and a block that is
+/// compiled is still registered, initialized and validated at start, so
+/// disabling it here is purely a routing/UX concern — not a way to suppress
+/// its missing-config errors. Listing a block that is not compiled is
+/// harmless, and keeps it off should a feature ever turn it on.
 ///
 /// `BlockSettings` stores the *full* block name (e.g. `impresspress/llm`)
 /// and defaults to enabled. Explicitly set the features we don't want to
