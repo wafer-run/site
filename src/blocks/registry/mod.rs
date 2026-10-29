@@ -1,6 +1,7 @@
 //! `wafer-run/registry` block — package registry for WAFER blocks.
 
 pub mod auth;
+pub mod config;
 pub mod db;
 pub mod handlers;
 pub mod migrations;
@@ -21,41 +22,11 @@ pub const NAME: &str = "wafer-run/registry";
 /// [`crate::register_blocks_for_site`]).
 pub const ROUTE_PREFIX: &str = "/registry";
 
-/// Configuration for the registry block.
-///
-/// Sourced from env vars in [`crate::run`] and passed explicitly rather
-/// than pulled from `ConfigService` so the call site stays easy to audit.
-#[derive(Clone, Debug)]
-pub struct RegistryConfig {
-    /// Email of the user allowed to publish. Enforced by `auth::require_admin`.
-    pub admin_email: String,
-
-    /// Top-level storage key prefix for registry tarballs. Defaults to
-    /// `"registry"`.
-    pub storage_key_prefix: String,
-
-    /// If non-empty, admin-gated routes additionally require the JWT's
-    /// `auth_method` claim to match this value (e.g. `"oauth.github"`).
-    /// Empty disables the check (any impresspress-authenticated admin email
-    /// is accepted — legacy behavior).
-    ///
-    /// The motivation is identity-assurance: an OAuth-issued token proves
-    /// the IdP has verified the email, while a password-login token does
-    /// not. For privileged actions like publishing, requiring OAuth keeps
-    /// an attacker who cracked the admin password out unless they also
-    /// own the linked GitHub account.
-    pub required_auth_method: String,
-}
-
-/// Register the `wafer-run/registry` block with route dispatch.
-pub fn register(w: &mut Wafer, cfg: RegistryConfig) -> anyhow::Result<()> {
-    tracing::debug!(
-        admin_email = %cfg.admin_email,
-        storage_key_prefix = %cfg.storage_key_prefix,
-        "registering wafer-run/registry with route dispatch"
-    );
-    let block = Arc::new(handlers::RegistryBlock::new(cfg));
-    w.register_block(NAME, block)
+/// Register the `wafer-run/registry` block and grant it the reads its
+/// session-token check makes ([`auth::auth_table_grants`]). Its config is
+/// declared on the block ([`config::config_vars`]) and read per request.
+pub fn register(w: &mut Wafer) -> anyhow::Result<()> {
+    w.register_block(NAME, Arc::new(handlers::RegistryBlock))
         .map_err(|e| anyhow::anyhow!("register {NAME}: {e}"))?;
     w.add_wrap_grants(auth::auth_table_grants())
         .map_err(|e| anyhow::anyhow!("grant {NAME} the session-token reads: {e}"))

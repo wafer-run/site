@@ -11,12 +11,32 @@
 //!   on-disk SQLite + LocalStorage. This is the canonical dev/test path.
 //! - `target-cloudflare`: cdylib for `wasm32-unknown-unknown` consumed by
 //!   `worker-build`. The cloudflare entry (`fetch_main`) routes requests
-//!   through `impresspress_cloudflare::run` with this crate's
+//!   through `impresspress_cloudflare::run_with_config` with this crate's
 //!   [`register_blocks_for_site`] / [`register_post_build_for_site`] hooks.
 //!   The post-build hook receives a [`StorageService`] (LocalStorage on
 //!   native, R2 on cloudflare) which [`blocks::content`] uses to serve
 //!   the site SPA chrome, so both targets serve `/` and the docs/registry
 //!   routes uniformly.
+
+// `clippy::arc_with_non_send_sync` is stated once here, crate-wide and
+// target-scoped, as impresspress-core and impresspress-cloudflare state it.
+//
+// wafer-run's service and block traits are bounded on
+// `wafer_block::compat::{MaybeSend, MaybeSync}`: real `Send`/`Sync` on native,
+// unbounded blanket markers on wasm32, so `dyn StorageService` — which
+// `blocks::content::ContentBlock` holds — is `!Send + !Sync` on that target
+// by construction. `wafer_run::Wafer::register_block` takes an
+// `Arc<dyn Block>` by value, so the `Arc` around such a block is forced, not
+// chosen over an `Rc`, and on the single-threaded wasm32 target it makes no
+// cross-thread claim. On native the lint is accurate and stays on.
+#![cfg_attr(
+    target_arch = "wasm32",
+    expect(
+        clippy::arc_with_non_send_sync,
+        reason = "on this single-threaded target the `Arc` is forced by the \
+                  trait-object bounds, not chosen over an `Rc`"
+    )
+)]
 
 pub mod blocks;
 pub mod flows;
@@ -34,7 +54,7 @@ use wafer_core::interfaces::storage::service::StorageService;
 // Shared registration helpers — used by both the native `run()` below and
 // the cloudflare `fetch_main` worker entry. They're kept free-functions
 // rather than methods on a struct so they can be passed by name to
-// `impresspress_cloudflare::run`'s `FnOnce` parameters.
+// `impresspress_cloudflare::run_with_config`'s `FnOnce` parameters.
 // ---------------------------------------------------------------------------
 
 /// Pre-build hook: applies site-specific [`ImpresspressBuilder`] configuration.
@@ -68,16 +88,9 @@ pub fn register_blocks_for_site(
 /// --target cloudflare` uploads `dist/**` under that prefix in R2). Both
 /// targets serve the SPA chrome from `/` uniformly.
 ///
-/// ## Registry env vars
-///
-/// The registry block reads its config from env vars. On native those come
-/// from `.env` via `dotenv`; on cloudflare they come from D1's `variables`
-/// table merged into the worker `env` by `impresspress_cloudflare::run`'s
-/// protected-key loader. Missing values soft-default to empty strings here
-/// rather than panicking, so wasm32 builds of the worker don't trip
-/// `expect()` at startup. The registry block surfaces a clear error at
-/// request time if its config is empty/wrong, which matches the failure
-/// mode for any other missing impresspress config.
+/// The registry block declares its own config variables
+/// (`blocks::registry::config`) and reads them per request, so nothing here
+/// passes it config.
 pub fn register_post_build_for_site(
     wafer: &mut wafer_run::Wafer,
     content_storage: Arc<dyn StorageService>,
@@ -120,15 +133,8 @@ pub fn register_post_build_for_site(
         }),
     );
 
-    // 4b. Registry block. See doc comment above re: soft-default behaviour.
-    let registry_cfg = crate::blocks::registry::RegistryConfig {
-        admin_email: std::env::var("WAFER_RUN__REGISTRY__ADMIN_EMAIL").unwrap_or_default(),
-        storage_key_prefix: std::env::var("WAFER_RUN__REGISTRY__STORAGE_KEY_PREFIX")
-            .unwrap_or_else(|_| "registry".into()),
-        required_auth_method: std::env::var("WAFER_RUN__REGISTRY__REQUIRED_AUTH_METHOD")
-            .unwrap_or_default(),
-    };
-    crate::blocks::registry::register(wafer, registry_cfg)
+    // 4b. Registry block.
+    crate::blocks::registry::register(wafer)
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
     // 4c. Health block. Backs `/_health` with a deploy-time config
@@ -183,11 +189,12 @@ fn block_settings_for_site() -> BlockSettings {
 /// The boot is impresspress's own native server
 /// ([`impresspress_server::run`]): `.env` and tracing, the `IMPRESSPRESS_*`
 /// infrastructure config, the platform services, the variables and
-/// block-settings tables, `build()`, the admin-first boot and the HTTP
-/// listener. The site adds itself through the same two hooks the Cloudflare
-/// entry passes to `impresspress_cloudflare::run` — [`register_blocks_for_site`]
-/// and [`register_post_build_for_site`] — and points the listener at the
-/// `wafer-site-main` flow.
+/// block-settings tables, `build()`, the admin-first boot (which applies
+/// every block's pending migrations, and refuses to start if one fails) and
+/// the HTTP listener. The site adds itself through the same two hooks the
+/// Cloudflare entry passes to `impresspress_cloudflare::run_with_config` —
+/// [`register_blocks_for_site`] and [`register_post_build_for_site`] — and
+/// points the listener at the `wafer-site-main` flow.
 ///
 /// The content block reads the site's assets from a LocalStorage rooted at
 /// `<repo>/dist`, separate from impresspress's platform storage (rooted at
@@ -196,7 +203,6 @@ fn block_settings_for_site() -> BlockSettings {
 pub async fn run() -> anyhow::Result<()> {
     impresspress_server::run(
         std::path::Path::new("."),
-        false,
         flows::site::FLOW_ID,
         native_app_hooks()?,
     )
@@ -229,11 +235,40 @@ pub fn native_app_hooks() -> anyhow::Result<impresspress_server::AppHooks> {
 // crate as a `cdylib`, then `worker-build` packages it into a CF Worker.
 // ---------------------------------------------------------------------------
 
+/// The first-admin bootstrap token, from the Worker secret of the same name
+/// when it is set, for [`impresspress_cloudflare::run_with_config`].
+///
+/// On Cloudflare a `WAFER_RUN_SHARED__*` key is read from D1's variables
+/// table, which an admin edits and which has no rows before the first deploy
+/// creates it. Request config is how a consumer hands its blocks a Worker
+/// secret instead. With it set, the auth block's `Init` in the first
+/// `/_deploy/prepare` on an empty users table stores the token's hash with a
+/// 24-hour expiry; its holder then creates the first admin on the
+/// `/b/auth/bootstrap` page with an email and password they type
+/// themselves. Once any account exists the value is ignored, and the secret
+/// can be deleted.
+///
+/// The token path only: the email + password bootstrap would put the
+/// admin's password in a Worker secret.
+#[cfg(feature = "target-cloudflare")]
+fn bootstrap_admin_config(env: &worker::Env) -> HashMap<String, String> {
+    use impresspress_core::blocks::auth::config::BOOTSTRAP_ADMIN_TOKEN_KEY;
+    env.secret(BOOTSTRAP_ADMIN_TOKEN_KEY)
+        .ok()
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| (BOOTSTRAP_ADMIN_TOKEN_KEY.to_string(), value))
+        .into_iter()
+        .collect()
+}
+
 /// Cloudflare Worker `fetch` entrypoint.
 ///
-/// Defers all the heavy lifting to [`impresspress_cloudflare::run`], which
-/// loads vars from D1, wires services, and invokes our two registration
-/// hooks before dispatching the request through WAFER.
+/// Defers all the heavy lifting to
+/// [`impresspress_cloudflare::run_with_config`]: D1-backed config, R2
+/// storage, the `/_deploy/*` funnel, our two registration hooks, then WAFER
+/// dispatch, with the bootstrap token as request config
+/// ([`bootstrap_admin_config`]).
 #[cfg(feature = "target-cloudflare")]
 #[worker::event(fetch)]
 async fn fetch_main(
@@ -241,10 +276,12 @@ async fn fetch_main(
     env: worker::Env,
     ctx: worker::Context,
 ) -> worker::Result<worker::Response> {
-    impresspress_cloudflare::run(
+    let config = bootstrap_admin_config(&env);
+    impresspress_cloudflare::run_with_config(
         req,
         env,
         ctx,
+        config,
         register_blocks_for_site,
         register_post_build_for_site,
     )

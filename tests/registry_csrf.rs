@@ -45,12 +45,6 @@ struct Site {
 
 impl Site {
     async fn boot() -> Site {
-        // The registry block reads its admin email from the process
-        // environment (see `register_post_build_for_site`). This binary
-        // holds this one test, so nothing else observes the write.
-        std::env::set_var("WAFER_RUN__REGISTRY__ADMIN_EMAIL", ADMIN_EMAIL);
-        std::env::remove_var("WAFER_RUN__REGISTRY__REQUIRED_AUTH_METHOD");
-
         let tmp = tempfile::tempdir().expect("tempdir");
         let storage_root = tmp.path().join("storage");
         std::fs::create_dir_all(&storage_root).expect("create storage root");
@@ -76,15 +70,27 @@ impl Site {
                 .expect("construct sqlite database service");
         let wafer = impresspress_server::start_native(
             &infra,
-            database,
+            database.clone(),
             &HashMap::new(),
             Default::default(),
-            false,
             wafer_site::flows::site::FLOW_ID,
             wafer_site::native_app_hooks().expect("the site's hooks"),
         )
         .await
         .expect("the site starts");
+
+        // The registry admin email is a variables-table row, written the way
+        // the admin Variables page writes it; the registry reads it per
+        // request through the config service.
+        impresspress_core::platform_state::variables::set_by_admin(
+            &database,
+            wafer_site::blocks::registry::config::ADMIN_EMAIL_KEY,
+            ADMIN_EMAIL,
+            Some(false),
+            impresspress_core::features::USER_EDITED_SENTINEL,
+        )
+        .await
+        .expect("set the registry admin email");
 
         let site = Site {
             base: format!("http://127.0.0.1:{port}"),
@@ -271,7 +277,7 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
         "a cross-site cookie publish is refused: {body}"
     );
     assert!(
-        body.contains("cross-origin request blocked"),
+        body.contains(impresspress_core::csrf::ORIGIN_BLOCKED_REASON),
         "refused by the CSRF policy, not by the registry: {body}"
     );
     assert!(!published(&versions(&site).await, "0.3.0"));

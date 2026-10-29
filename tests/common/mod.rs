@@ -39,55 +39,73 @@ use axum::{
     routing::any,
     Router,
 };
-use impresspress_core::test_support::{InMemoryStorageService, TestContext};
+use impresspress_core::{
+    blocks::auth::repo::users::InitialRole,
+    test_support::{InMemoryStorageService, TestContext},
+};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use wafer_block_http_listener::{http_to_message, wafer_output_to_response};
 use wafer_run::{context::Context, Block, InputStream, LifecycleEvent, LifecycleType};
 
-use wafer_site::blocks::registry::{self, handlers::RegistryBlock, RegistryConfig};
+use wafer_site::blocks::registry::{self, handlers::RegistryBlock};
 
 /// The registry's test runtime: a [`TestContext`] running as
 /// `wafer-run/registry`.
 pub type RegistryCtx = TestContext;
 
-/// Build the runtime, register the registry block with `cfg`, and run its
-/// `Init` in the registry's own frame. Returns the registry-framed context
-/// and the block.
-async fn boot(cfg: RegistryConfig) -> (RegistryCtx, Arc<dyn Block>) {
+/// The admin email [`boot_registry_against_memory`] configures.
+pub const MEMORY_ADMIN_EMAIL: &str = "test@example.invalid";
+
+/// Build the runtime with `config` set through the config service (as a
+/// deployment's variables rows would be) and register the registry block,
+/// without running its `Init`. Returns the registry-framed context and the
+/// block.
+pub async fn build_registry(config: &[(&str, &str)]) -> (RegistryCtx, Arc<dyn Block>) {
     let mut ctx = TestContext::with_auth().await.with_sign_in_added();
+    for (key, value) in config {
+        ctx.set_config(key, value);
+    }
     ctx.register_block(
         "wafer-run/storage",
         impresspress_core::blocks::storage::create(Arc::new(InMemoryStorageService::new())),
     );
-    let block: Arc<dyn Block> = Arc::new(RegistryBlock::new(cfg));
+    let block: Arc<dyn Block> = Arc::new(RegistryBlock);
     ctx.register_block(registry::NAME, block.clone());
     ctx.add_deployment_grants(registry::auth::auth_table_grants());
-    let ctx = ctx.running_as(registry::NAME);
+    (ctx.running_as(registry::NAME), block)
+}
 
+/// The registry's `Init` lifecycle event.
+pub fn init_event() -> LifecycleEvent {
+    LifecycleEvent {
+        event_type: LifecycleType::Init,
+        data: Vec::new(),
+    }
+}
+
+/// [`build_registry`], then run the block's `Init` in the registry's own
+/// frame.
+async fn boot(config: &[(&str, &str)]) -> (RegistryCtx, Arc<dyn Block>) {
+    let (ctx, block) = build_registry(config).await;
     block
-        .lifecycle(
-            &ctx,
-            LifecycleEvent {
-                event_type: LifecycleType::Init,
-                data: Vec::new(),
-            },
-        )
+        .lifecycle(&ctx, init_event())
         .await
-        .expect("registry Init lifecycle seeds reserved orgs");
+        .expect("registry Init applies its migrations and seeds reserved orgs");
     (ctx, block)
 }
 
-/// Construct the registry block with a minimal config and run its
-/// `LifecycleEvent::Init`. Returns the registry-framed context so the
-/// caller can query the seeded collections via `db::*`.
+/// Construct the registry block with [`MEMORY_ADMIN_EMAIL`] as its admin
+/// and run its `LifecycleEvent::Init`. Returns the registry-framed context so
+/// the caller can query the seeded collections via `db::*`.
 pub async fn boot_registry_against_memory() -> Arc<RegistryCtx> {
-    let (ctx, _block) = boot(RegistryConfig {
-        admin_email: "test@example.invalid".into(),
-        storage_key_prefix: "registry".into(),
-        required_auth_method: String::new(),
-    })
-    .await;
+    boot_registry_with_config(&[(registry::config::ADMIN_EMAIL_KEY, MEMORY_ADMIN_EMAIL)]).await
+}
+
+/// [`boot_registry_against_memory`] with exactly `config` as the registry's
+/// variables: an empty slice is a deployment that set none of them.
+pub async fn boot_registry_with_config(config: &[(&str, &str)]) -> Arc<RegistryCtx> {
+    let (ctx, _block) = boot(config).await;
     Arc::new(ctx)
 }
 
@@ -170,12 +188,7 @@ async fn dispatch(State(state): State<AppState>, req: Request) -> Response<Body>
 /// Start the registry block behind an ephemeral axum server. Shared setup
 /// for every `start_test_site_*` entry point.
 async fn start_with(admin_email: &str) -> (TestApp, Arc<RegistryCtx>) {
-    let (ctx, block) = boot(RegistryConfig {
-        admin_email: admin_email.into(),
-        storage_key_prefix: "registry".into(),
-        required_auth_method: String::new(),
-    })
-    .await;
+    let (ctx, block) = boot(&[(registry::config::ADMIN_EMAIL_KEY, admin_email)]).await;
     let ctx = Arc::new(ctx);
 
     let state = AppState {
@@ -251,7 +264,8 @@ pub async fn start_test_site_with_admin(admin_email: &str) -> TestApp {
 /// `/registry/cli-login` in a browser.
 pub async fn start_test_site_with_admin_cookie(admin_email: &str) -> TestApp {
     let (mut app, ctx) = start_with(admin_email).await;
-    ctx.seed_account(admin_email, ADMIN_PASSWORD, "user").await;
+    ctx.seed_account(admin_email, ADMIN_PASSWORD, InitialRole::User)
+        .await;
     let session = ctx.sign_in(admin_email, ADMIN_PASSWORD).await;
 
     let mut default_headers = reqwest::header::HeaderMap::new();
@@ -333,7 +347,7 @@ license = "MIT"
 /// Insert a row into the registry's `TOKENS` collection for the given
 /// user. The hash is `sha256(raw)` — same shape `exchange_cli_code`
 /// produces, so `resolve_bearer` accepts the raw token verbatim.
-async fn seed_token(ctx: &dyn Context, user_id: &str, email: &str, raw_token: &str) {
+pub async fn seed_token(ctx: &dyn Context, user_id: &str, email: &str, raw_token: &str) {
     use wafer_core::clients::database as db;
     let hash = hex::encode(Sha256::digest(raw_token.as_bytes()));
     let mut data: HashMap<String, serde_json::Value> = HashMap::new();
@@ -341,11 +355,6 @@ async fn seed_token(ctx: &dyn Context, user_id: &str, email: &str, raw_token: &s
     data.insert("email".into(), json!(email));
     data.insert("name".into(), json!("wafer-cli"));
     data.insert("hash".into(), json!(hash));
-    // Declare optional fields explicitly so the auto-schema path doesn't
-    // drop the columns. See `db.rs::insert_version` docs for the same
-    // drift-guard pattern.
-    data.insert("last_used_at".into(), serde_json::Value::Null);
-    data.insert("revoked_at".into(), serde_json::Value::Null);
     db::create(ctx, registry::db::TOKENS, data)
         .await
         .expect("seed token");

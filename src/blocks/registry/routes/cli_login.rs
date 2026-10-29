@@ -18,15 +18,15 @@ use serde::Deserialize;
 use serde_json::json;
 use wafer_run::{common::ServiceOp, Context, InputStream, Message, OutputStream};
 
-use crate::blocks::registry::{auth, db, routes::resp, templates, RegistryConfig};
+use crate::blocks::registry::{auth, db, routes::resp, templates};
 
 /// GET `/registry/cli-login` — render a fresh device code for the admin.
 ///
 /// Gate: admin-only via [`auth::require_admin`]. Non-admins receive whatever
 /// response `require_admin` generated (HTML coming-soon when they sent
 /// `Accept: text/html`, JSON coming-soon otherwise — 403 in both cases).
-pub async fn page(ctx: &dyn Context, msg: &Message, cfg: &RegistryConfig) -> OutputStream {
-    let admin = match auth::require_admin(ctx, msg, cfg).await {
+pub async fn page(ctx: &dyn Context, msg: &Message) -> OutputStream {
+    let admin = match auth::require_admin(ctx, msg).await {
         Ok(u) => u,
         Err(out) => return out,
     };
@@ -66,12 +66,7 @@ struct UserProfileResponse {
 /// - 400 `bad-request` — non-JSON body or missing `code` field.
 /// - 404 `invalid-code` — code missing, expired, or already consumed.
 /// - 500 — backend error on code exchange.
-pub async fn exchange(
-    ctx: &dyn Context,
-    _msg: &Message,
-    input: InputStream,
-    _cfg: &RegistryConfig,
-) -> OutputStream {
+pub async fn exchange(ctx: &dyn Context, _msg: &Message, input: InputStream) -> OutputStream {
     let body_bytes = match input.collect_to_bytes().await {
         Ok(bytes) => bytes,
         Err(e) => return OutputStream::error(e),

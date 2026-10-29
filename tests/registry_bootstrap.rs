@@ -1,8 +1,9 @@
-//! Verifies CollectionSchema-driven table creation + reserved-orgs seed.
+//! Verifies the reserved-orgs seed.
 //!
 //! Boots the registry block against an in-memory sqlite context, dispatches
-//! `LifecycleEvent::Init`, and asserts the 4 reserved orgs are present. A
-//! second Init invocation confirms the seed is idempotent.
+//! `LifecycleEvent::Init` (which applies `001_initial_schema` and seeds), and
+//! asserts every org in `RESERVED_ORGS` is present. A second seed confirms
+//! it is idempotent.
 
 mod common;
 
@@ -29,12 +30,20 @@ async fn init_creates_tables_and_seeds_reserved_orgs() {
     names.sort();
     assert_eq!(
         names,
-        vec![
-            "impresspress".to_string(),
-            "wafer".to_string(),
-            "wafer-run".to_string(),
-        ],
+        registry::db::RESERVED_ORGS,
         "reserved orgs must match the declared constant in registry::db::RESERVED_ORGS"
+    );
+    // The five names wafer.run has always reserved, including the retired
+    // `solobase` and the org's own `suppers-ai`, so no one can claim them.
+    assert_eq!(
+        registry::db::RESERVED_ORGS,
+        [
+            "impresspress",
+            "solobase",
+            "suppers-ai",
+            "wafer",
+            "wafer-run"
+        ]
     );
 
     // Calling the seed again is a no-op: no duplicate rows.
@@ -45,7 +54,8 @@ async fn init_creates_tables_and_seeds_reserved_orgs() {
         .await
         .expect("count orgs");
     assert_eq!(
-        count_after, 3,
+        count_after,
+        registry::db::RESERVED_ORGS.len() as i64,
         "seed must be idempotent — re-running must not add rows"
     );
 }

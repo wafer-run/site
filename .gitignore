@@ -1,9 +1,9 @@
 .env
 .env.prod
 
-# Rust build artifacts
+# Rust build artifacts. Cargo.lock is committed: the site is a deployed
+# binary/Worker, and CI builds `--locked`.
 /target/
-/Cargo.lock
 
 # Node
 node_modules/

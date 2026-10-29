@@ -1,5 +1,8 @@
--- Initial registry schema. Run at block Init via db::ddl.
--- Idempotent — every statement uses IF NOT EXISTS.
+-- Initial registry schema. Applied once by impresspress's migration ledger
+-- runner, from the registry block's Init, as one transaction together with
+-- its ledger row (see `migrations/mod.rs`). Shipped: never edit a statement;
+-- a change is a new numbered file. Comment lines are not part of its
+-- content hash (`tests/registry_migrations.rs` pins it).
 
 CREATE TABLE IF NOT EXISTS wafer_run__registry__orgs (
     id              TEXT PRIMARY KEY,

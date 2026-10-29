@@ -1,0 +1,14 @@
+# The one Rust version this site builds, lints and tests with — locally and in
+# CI (each job runs a bare `rustup toolchain install`, which reads this file).
+# The same channel as impresspress's rust-toolchain.toml at IMPRESSPRESS_REF.
+#
+# Pinned rather than floating on `stable`: CI runs clippy with `-D warnings`,
+# so a new stable release (new lints, new deprecations) would turn every open
+# PR red on code nobody had touched. Moving to a new release is its own PR:
+# bump `channel`, fix what the new compiler and clippy report.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+# wasm32-unknown-unknown: the Cloudflare Worker build (`target-cloudflare`).
+targets = ["wasm32-unknown-unknown"]

@@ -1,12 +1,15 @@
 //! Unit tests for the registry's auth gate.
 //!
 //! 1. `require_user`: bearer-PAT resolution against `registry_tokens`.
-//! 2. `require_admin`: a PAT whose email is not the admin's falls through to
-//!    the 403 coming-soon JSON branch.
+//! 2. `require_admin`: the admin email is the registry's
+//!    `WAFER_RUN__REGISTRY__ADMIN_EMAIL` config variable. A PAT carrying it
+//!    is admitted; one carrying another email, or any email while the
+//!    variable is unset, gets the 403 coming-soon JSON; and a required auth
+//!    method the PAT does not have gets the 403 auth-method-required JSON.
 //! 3. `require_user`: no credential at all is a 401.
 //! 4. `require_user`: an impresspress session token is checked by
 //!    impresspress's verifier — a signed-in session resolves, and the same
-//!    token after logout (blocklisted) does not.
+//!    token after logout (its session row deleted) does not.
 //!
 //! The tests talk to the registry block's harness directly — no HTTP.
 
@@ -21,7 +24,7 @@ use wafer_run::{Message, OutputStream};
 use wafer_site::blocks::registry::{
     self,
     auth::{require_admin, require_user},
-    RegistryConfig,
+    config::{ADMIN_EMAIL_KEY, REQUIRED_AUTH_METHOD_KEY},
 };
 
 /// Reads the HTTP status code out of an `OutputStream` by draining it —
@@ -88,43 +91,69 @@ async fn bearer_pat_resolves_against_registry_tokens() {
     assert_eq!(user.email, "u1@example.com");
 }
 
-#[tokio::test]
-async fn require_admin_rejects_non_admin_with_coming_soon_json() {
-    let ctx = common::boot_registry_against_memory().await;
-
-    // Same PAT seeding as above — user "u1" whose email we can't fetch.
-    let raw = "another-secret";
-    let hash = hex::encode(Sha256::digest(raw.as_bytes()));
-    let mut data: HashMap<String, serde_json::Value> = HashMap::new();
-    data.insert("user_id".into(), serde_json::json!("u1"));
-    data.insert("email".into(), serde_json::json!("u1@example.com"));
-    data.insert("name".into(), serde_json::json!("test"));
-    data.insert("hash".into(), serde_json::json!(hash));
-    db::create(ctx.as_ref(), registry::db::TOKENS, data)
-        .await
-        .expect("insert token");
-
-    let cfg = RegistryConfig {
-        admin_email: "admin@example.com".into(),
-        storage_key_prefix: "registry".into(),
-        required_auth_method: String::new(),
-    };
-
+/// A request carrying a registry PAT minted for `email`.
+async fn pat_request(ctx: &common::RegistryCtx, email: &str) -> Message {
+    let raw = format!("wafer_pat_{}", hex::encode(rand::random::<[u8; 32]>()));
+    common::seed_token(ctx, "u1", email, &raw).await;
     let mut msg = Message::new("retrieve");
     msg.set_meta("http.header.authorization", format!("Bearer {raw}"));
     // No `accept` header → JSON response branch.
+    msg
+}
 
-    let Err(err_out) = require_admin(ctx.as_ref(), &msg, &cfg).await else {
-        panic!("empty email is not the admin email");
-    };
-
-    let (status, body) = status_and_body(err_out).await;
+/// The 403 body's `error` tag.
+async fn refusal_tag(out: OutputStream) -> String {
+    let (status, body) = status_and_body(out).await;
     assert_eq!(status, 403);
-    let body_str = String::from_utf8(body).expect("utf8 body");
-    assert!(
-        body_str.contains("coming-soon"),
-        "body should tag error as coming-soon: {body_str}"
-    );
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("JSON body");
+    body["error"].as_str().unwrap_or_default().to_string()
+}
+
+#[tokio::test]
+async fn require_admin_admits_the_configured_admin_email_only() {
+    let ctx = common::boot_registry_with_config(&[(ADMIN_EMAIL_KEY, "admin@example.com")]).await;
+
+    // The configured address, in any ASCII case, is the admin.
+    let msg = pat_request(&ctx, "Admin@Example.com").await;
+    let Ok(admin) = require_admin(ctx.as_ref(), &msg).await else {
+        panic!("the configured admin email is admitted");
+    };
+    assert_eq!(admin.email, "Admin@Example.com");
+
+    let msg = pat_request(&ctx, "u1@example.com").await;
+    let Err(out) = require_admin(ctx.as_ref(), &msg).await else {
+        panic!("another email is not the admin");
+    };
+    assert_eq!(refusal_tag(out).await, "coming-soon");
+}
+
+#[tokio::test]
+async fn require_admin_admits_nobody_while_the_admin_email_is_unset() {
+    // A deployment that never set the variable: publishing is closed, and
+    // the registry still serves (`Init` ran above).
+    let ctx = common::boot_registry_with_config(&[]).await;
+
+    let msg = pat_request(&ctx, "admin@example.com").await;
+    let Err(out) = require_admin(ctx.as_ref(), &msg).await else {
+        panic!("no email is the admin while the variable is unset");
+    };
+    assert_eq!(refusal_tag(out).await, "coming-soon");
+}
+
+#[tokio::test]
+async fn require_admin_enforces_the_configured_auth_method() {
+    let ctx = common::boot_registry_with_config(&[
+        (ADMIN_EMAIL_KEY, "admin@example.com"),
+        (REQUIRED_AUTH_METHOD_KEY, "oauth.github"),
+    ])
+    .await;
+
+    // A PAT's auth method is `pat`, not the required one.
+    let msg = pat_request(&ctx, "admin@example.com").await;
+    let Err(out) = require_admin(ctx.as_ref(), &msg).await else {
+        panic!("the admin signed in another way is refused");
+    };
+    assert_eq!(refusal_tag(out).await, "auth-method-required");
 }
 
 #[tokio::test]
@@ -142,15 +171,22 @@ async fn missing_credentials_returns_401() {
 
 /// A session impresspress's real login route issued resolves to its user
 /// through the `auth_token` cookie, and the same cookie after the real
-/// logout route blocklisted its token does not: the registry checks session
-/// tokens with impresspress's verifier (blocklist and `auth_version`
-/// included), not a copy of its signature check.
+/// logout route does not: logout deletes the session row of the token's
+/// login family, and the registry checks session tokens with impresspress's
+/// verifier (the session-row and `auth_version` reads included), not a copy
+/// of its signature check.
 #[tokio::test]
 async fn session_token_resolves_until_logout() {
     let ctx = common::boot_registry_against_memory().await;
     let email = "someone@example.com";
     let password = "correct horse battery staple";
-    let user_id = ctx.seed_account(email, password, "user").await;
+    let user_id = ctx
+        .seed_account(
+            email,
+            password,
+            impresspress_core::blocks::auth::repo::users::InitialRole::User,
+        )
+        .await;
     let session = ctx.sign_in(email, password).await;
 
     let mut msg = Message::new("retrieve");

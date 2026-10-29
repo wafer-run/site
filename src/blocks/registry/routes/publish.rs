@@ -25,7 +25,7 @@
 use serde_json::json;
 use wafer_run::{Context, InputStream, Message, OutputStream};
 
-use crate::blocks::registry::{auth, db, routes::resp, tarball, RegistryConfig};
+use crate::blocks::registry::{auth, config, db, routes::resp, tarball};
 
 /// Cap on total body size accepted by `POST /registry/api/publish`. Matches
 /// the 20 MiB archive cap — the multipart envelope adds a few hundred bytes
@@ -36,14 +36,9 @@ use crate::blocks::registry::{auth, db, routes::resp, tarball, RegistryConfig};
 const MAX_PUBLISH_BODY_BYTES: usize = 22 * 1024 * 1024;
 
 /// `POST /registry/api/publish` — accept a `.wafer` tarball and register it.
-pub async fn post(
-    ctx: &dyn Context,
-    msg: &Message,
-    input: InputStream,
-    cfg: &RegistryConfig,
-) -> OutputStream {
+pub async fn post(ctx: &dyn Context, msg: &Message, input: InputStream) -> OutputStream {
     // 1. Admin gate.
-    let admin = match auth::require_admin(ctx, msg, cfg).await {
+    let admin = match auth::require_admin(ctx, msg).await {
         Ok(u) => u,
         Err(out) => return out,
     };
@@ -118,11 +113,14 @@ pub async fn post(
         "{}/{}/{}.wafer",
         t.wafer_toml.package.org, t.wafer_toml.package.name, t.wafer_toml.package.version
     );
-    let folder = &cfg.storage_key_prefix;
+    let folder = match config::storage_key_prefix(ctx).await {
+        Ok(folder) => folder,
+        Err(e) => return OutputStream::error(e),
+    };
 
     if let Err(e) = wafer_core::clients::storage::put(
         ctx,
-        folder,
+        &folder,
         &storage_key,
         &bytes,
         "application/octet-stream",
@@ -143,7 +141,7 @@ pub async fn post(
     )
     .await
     {
-        let _ = wafer_core::clients::storage::delete(ctx, folder, &storage_key).await;
+        let _ = wafer_core::clients::storage::delete(ctx, &folder, &storage_key).await;
         return resp::internal(&format!("db insert: {e}"));
     }
 
