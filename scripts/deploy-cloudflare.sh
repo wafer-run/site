@@ -2,43 +2,46 @@
 # Deploy wafer-site to Cloudflare Workers + R2 + D1.
 #
 # Prerequisites (one-time):
-#   1. wrangler CLI installed and `wrangler login` (or set CLOUDFLARE_API_TOKEN)
-#   2. wrangler d1 create <name>          → put the id in .env
-#   3. wrangler r2 bucket create <name>   → name must match impresspress.toml
-#   4. cp .env.example .env, fill in:
+#   1. `npx wrangler@4 login` (or set CLOUDFLARE_API_TOKEN)
+#   2. npx wrangler@4 d1 create <name>          → put the id in the env file
+#   3. npx wrangler@4 r2 bucket create <name>   → name must match impresspress.toml
+#   4. npx wrangler@4 kv namespace create CONFIG_CACHE → id into
+#      wrangler.overrides.toml
+#   5. An env file (see .env.example) with:
 #        CLOUDFLARE_ACCOUNT_ID
 #        CLOUDFLARE_API_TOKEN
 #        IMPRESSPRESS_CLOUDFLARE_D1_DATABASE_ID
-#   5. impresspress binary on PATH, OR env $IMPRESSPRESS_BIN points at it,
-#      OR a sibling clone of impresspress/impresspress exists at ../impresspress
+#        IMPRESSPRESS_DEPLOY_TOKEN (see below)
+#   6. impresspress binary on PATH, OR env $IMPRESSPRESS_BIN points at it,
+#      OR a sibling clone of impresspress/impresspress exists at ../impresspress.
+#      Use the CLI from the impresspress commit this site pins
+#      (IMPRESSPRESS_REF in .github/workflows/ci.yml): a CLI and a Worker from
+#      different releases refuse each other.
 #
 # Usage:
 #   ./scripts/deploy-cloudflare.sh                    # build + deploy
 #   ./scripts/deploy-cloudflare.sh build              # build only
-#   ./scripts/deploy-cloudflare.sh secret             # set worker secrets (JWT + deploy token)
 #   ./scripts/deploy-cloudflare.sh tail               # stream worker logs
 #
-# Deploy flow: `deploy` shells out to `impresspress deploy --target cloudflare`,
-# which is atomic — it uploads a new worker version without routing traffic
-# to it, POSTs to that version's `/_deploy/init` (authenticated with
-# IMPRESSPRESS_DEPLOY_TOKEN) to run migrations + seeds, and only promotes the
-# version to 100% traffic if that call succeeds. There's no separate manual
-# seeding step anymore: migrations/seeds run in-worker as part of every
-# deploy, gated on that same call succeeding.
-#
-# First-time setup for a brand-new worker:
-#   1. secret   — push WAFER_RUN__AUTH__JWT_SECRET + IMPRESSPRESS_DEPLOY_TOKEN
-#                 to the worker secret store (requires a prior `build` so
-#                 wrangler.toml exists)
-#   2. deploy   — runs the atomic flow above
-#
-# A worker that has never been deployed has no secrets set yet, so if you
-# run `deploy` before `secret`, `/_deploy/init` 404s (secret unset ⇒ endpoint
-# disabled) and the version is uploaded but never promoted — harmless, and
-# it leaves wrangler.toml in place for the `secret` step. Sequence is then:
-# deploy (fails, pre-promote) → secret → deploy (succeeds). Re-deploys after
-# that can just run `deploy`; secrets don't need to be re-pushed unless
-# rotating them.
+# Deploy flow: `deploy` runs `impresspress deploy --target cloudflare`, which
+# does all of it in one command:
+#   - builds and deploys the password-hasher Worker first
+#     (`wafer-site-password-hasher`, a SQLite-backed Durable Object; created
+#     on the first deploy, see impresspress.toml [cloudflare.password_hasher]);
+#   - creates the main Worker when it does not exist yet (a 503 placeholder,
+#     replaced by the promotion below), and sets IMPRESSPRESS_DEPLOY_TOKEN and
+#     WAFER_RUN__AUTH__JWT_SECRET on it when it lacks them — each from the
+#     same-named environment variable when set, otherwise generated; a
+#     generated deploy token is printed once with the `export` line later
+#     deploys need;
+#   - uploads a new main Worker version without routing traffic to it, runs
+#     `/_deploy/prepare` on it (every block's pending migrations, each file
+#     one transaction with its ledger row, and the seeds), verifies it
+#     (`/_deploy/verify`: preview lockdown, release assets, the hasher probe,
+#     impresspress.toml's `deploy_smoke_paths`), and only then promotes it.
+# A Worker that already holds its deploy token needs IMPRESSPRESS_DEPLOY_TOKEN
+# exported with the same value; without it the CLI stops before the build and
+# names the command that sets a new one.
 #
 # Environment selection: ENV_FILE=.env.prod ./scripts/deploy-cloudflare.sh deploy
 #   defaults to .env if unset.
@@ -97,22 +100,15 @@ case "$cmd" in
     ;;
 
   deploy)
-    # Fail fast, before the (multi-minute) wasm build, if the deploy token
-    # isn't in the environment. `impresspress deploy` itself also refuses to
-    # run without it, but checking here avoids burning a build first.
-    if [[ -z "${IMPRESSPRESS_DEPLOY_TOKEN:-}" ]]; then
-      echo "error: IMPRESSPRESS_DEPLOY_TOKEN not in $ENV_FILE (or exported)." >&2
-      echo "       Run './scripts/deploy-cloudflare.sh secret' to provision it," >&2
-      echo "       then export the same value before re-running deploy." >&2
-      exit 1
-    fi
-
     "$IMPRESSPRESS_BIN" deploy --target cloudflare
 
     # Post-deploy health gate. `/_health` (wafer-site/health block) walks
     # every registered block's `ConfigVar` declarations and 503s if any
-    # required key is unset. Roll back on non-200 so a misconfigured
-    # deploy doesn't sit live with the prior version's traffic.
+    # required key is unset (the registry's keys are all optional, so an
+    # unset registry admin email is not one). Roll back on non-200 so a
+    # misconfigured deploy doesn't sit live: `wrangler rollback` returns to
+    # the previous version, which on a first deploy is the CLI's 503
+    # placeholder.
     #
     # HEALTH_URL overrides the default wafer.run URL for canary /
     # staging environments. HEALTH_SKIP=1 disables the gate (e.g. when
@@ -125,7 +121,7 @@ case "$cmd" in
       status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$health_url" || echo "000")
       if [[ "$status" != "200" ]]; then
         echo "error: $health_url returned $status — rolling back" >&2
-        wrangler rollback --config "$WRANGLER_TOML" \
+        npx wrangler@4 rollback --config "$WRANGLER_TOML" \
           --message "post-deploy /_health failed (status: $status)" || true
         exit 1
       fi
@@ -135,41 +131,16 @@ case "$cmd" in
     fi
     ;;
 
-  secret)
-    if [[ ! -f "$WRANGLER_TOML" ]]; then
-      echo "error: wrangler.toml not found — run 'build' first" >&2
-      exit 1
-    fi
-    if [[ -z "${WAFER_RUN__AUTH__JWT_SECRET:-}" ]]; then
-      echo "error: WAFER_RUN__AUTH__JWT_SECRET not in $ENV_FILE" >&2
-      exit 1
-    fi
-    printf '%s' "$WAFER_RUN__AUTH__JWT_SECRET" \
-      | wrangler secret put WAFER_RUN__AUTH__JWT_SECRET --config "$WRANGLER_TOML"
-
-    if [[ -z "${IMPRESSPRESS_DEPLOY_TOKEN:-}" ]]; then
-      echo "error: IMPRESSPRESS_DEPLOY_TOKEN not in $ENV_FILE" >&2
-      exit 1
-    fi
-    # Deploy-init auth token: the worker's `/_deploy/init` endpoint (hit by
-    # `impresspress deploy` pre-promote, to run migrations + seeds) compares the
-    # `x-deploy-token` header against this same secret. The same value must
-    # also be exported as IMPRESSPRESS_DEPLOY_TOKEN in the shell that runs
-    # `deploy`, so the CLI can send it.
-    printf '%s' "$IMPRESSPRESS_DEPLOY_TOKEN" \
-      | wrangler secret put IMPRESSPRESS_DEPLOY_TOKEN --config "$WRANGLER_TOML"
-    ;;
-
   tail)
     if [[ ! -f "$WRANGLER_TOML" ]]; then
       echo "error: wrangler.toml not found — run 'build' first" >&2
       exit 1
     fi
-    wrangler tail wafer-site --config "$WRANGLER_TOML" --format pretty
+    npx wrangler@4 tail --config "$WRANGLER_TOML" --format pretty
     ;;
 
   *)
-    echo "usage: $0 [build|deploy|secret|tail]" >&2
+    echo "usage: $0 [build|deploy|tail]" >&2
     exit 1
     ;;
 esac

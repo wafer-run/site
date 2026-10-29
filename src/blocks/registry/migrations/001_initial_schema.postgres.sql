@@ -1,6 +1,9 @@
 -- Initial registry schema (Postgres parity — untested).
 -- Site deploys on D1 today; this file is included for parity with the
 -- auth-migrations pattern. Validate before enabling Postgres for site.
+-- Applied once by impresspress's migration ledger runner, as one transaction
+-- together with its ledger row (see `migrations/mod.rs`). Comment lines are
+-- not part of its content hash (`tests/registry_migrations.rs` pins it).
 
 CREATE TABLE IF NOT EXISTS wafer_run__registry__orgs (
     id              TEXT PRIMARY KEY,

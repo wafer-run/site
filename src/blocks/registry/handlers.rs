@@ -1,24 +1,17 @@
 //! HTTP request handler and route dispatcher for the registry block.
 
+use impresspress_core::migration_helper;
 use wafer_block::types::CollectionSchema;
 use wafer_run::{
     Block, BlockCategory, BlockInfo, Context, InputStream, InstanceMode, LifecycleEvent,
     LifecycleType, Message, OutputStream, WaferError,
 };
 
-use crate::blocks::registry::{db, routes, RegistryConfig, NAME};
+use crate::blocks::registry::{config, db, migrations, routes, NAME, STORAGE_FOLDER};
 
-/// Registry block instance with configuration.
-#[derive(Clone)]
-pub struct RegistryBlock {
-    pub cfg: RegistryConfig,
-}
-
-impl RegistryBlock {
-    pub fn new(cfg: RegistryConfig) -> Self {
-        RegistryBlock { cfg }
-    }
-}
+/// The registry block. Stateless: its config is read per request through the
+/// config service (see [`config`]).
+pub struct RegistryBlock;
 
 // On wasm32 (cloudflare target) the futures returned by service-call
 // helpers (e.g. `wafer_core::clients::database::create`) are `!Send`
@@ -32,13 +25,15 @@ impl Block for RegistryBlock {
         BlockInfo::new(NAME, "0.1.0", "http-handler@v1", "WAFER package registry")
             .instance_mode(InstanceMode::Singleton)
             .category(BlockCategory::Infrastructure)
-            // `wafer-run/config`: the migration dialect and the token
-            // issuer (`crypto::expected_issuer`) are read through it.
+            // `wafer-run/config`: the migration dialect, the token issuer
+            // (`crypto::expected_issuer`) and the registry's own variables
+            // (`config`) are read through it.
             .requires(vec![
                 "wafer-run/database".into(),
                 "wafer-run/storage".into(),
                 "wafer-run/config".into(),
             ])
+            .config_keys(config::config_vars())
             .collections(vec![
                 CollectionSchema::new(db::ORGS)
                     .field_unique("name", "string")
@@ -73,10 +68,12 @@ impl Block for RegistryBlock {
                 CollectionSchema::new(db::CODES)
                     .field_unique("code", "string")
                     .field("user_id", "string")
+                    .field("email", "string")
                     .field("expires_at", "datetime")
                     .field_optional("used_at", "datetime"),
                 CollectionSchema::new(db::TOKENS)
                     .field("user_id", "string")
+                    .field("email", "string")
                     .field_default("name", "string", "wafer-cli")
                     .field_unique("hash", "string")
                     .field_optional("last_used_at", "datetime")
@@ -93,41 +90,33 @@ impl Block for RegistryBlock {
         match (action, path) {
             // Browse endpoints.
             ("retrieve", "/registry") | ("retrieve", "/registry/") => {
-                routes::browse::index(ctx, &msg, &self.cfg).await
+                routes::browse::index(ctx, &msg).await
             }
-            ("retrieve", "/registry/search") => routes::browse::search(ctx, &msg, &self.cfg).await,
+            ("retrieve", "/registry/search") => routes::browse::search(ctx, &msg).await,
             // Package detail must come before the generic /registry/* catch.
             ("retrieve", p) if p.starts_with("/registry/api/packages/") => {
-                routes::packages::get(ctx, &msg, &self.cfg).await
+                routes::packages::get(ctx, &msg).await
             }
-            ("retrieve", "/registry/api/me") => routes::me::get(ctx, &msg, &self.cfg).await,
-            ("retrieve", "/registry/cli-login") => {
-                routes::cli_login::page(ctx, &msg, &self.cfg).await
-            }
+            ("retrieve", "/registry/api/me") => routes::me::get(ctx, &msg).await,
+            ("retrieve", "/registry/cli-login") => routes::cli_login::page(ctx, &msg).await,
             ("retrieve", p) if p.starts_with("/registry/download/") => {
-                routes::download::get(ctx, &msg, &self.cfg).await
+                routes::download::get(ctx, &msg).await
             }
             // Catch remaining /registry/* GETs (package detail pages).
             ("retrieve", p) if p.starts_with("/registry/") => {
-                routes::browse::package_detail(ctx, &msg, &self.cfg).await
+                routes::browse::package_detail(ctx, &msg).await
             }
             // Publish endpoint. `http_to_message` maps POST to the action
             // `"create"` (see `wafer-block-http-listener`); the dispatcher
             // matches on that rather than a WAFER-abstract `"mutate"`.
-            ("create", "/registry/api/publish") => {
-                routes::publish::post(ctx, &msg, input, &self.cfg).await
-            }
+            ("create", "/registry/api/publish") => routes::publish::post(ctx, &msg, input).await,
             // CLI login exchange.
             ("create", "/registry/api/cli-login/exchange") => {
-                routes::cli_login::exchange(ctx, &msg, input, &self.cfg).await
+                routes::cli_login::exchange(ctx, &msg, input).await
             }
             // Yank and unyank endpoints: match by path suffix.
-            ("create", p) if p.ends_with("/yank") => {
-                routes::yank::yank(ctx, &msg, input, &self.cfg).await
-            }
-            ("create", p) if p.ends_with("/unyank") => {
-                routes::yank::unyank(ctx, &msg, input, &self.cfg).await
-            }
+            ("create", p) if p.ends_with("/yank") => routes::yank::yank(ctx, &msg, input).await,
+            ("create", p) if p.ends_with("/unyank") => routes::yank::unyank(ctx, &msg, input).await,
             // Unmatched route.
             _ => OutputStream::error(WaferError {
                 code: wafer_run::ErrorCode::NotFound,
@@ -142,13 +131,11 @@ impl Block for RegistryBlock {
         ctx: &dyn Context,
         event: LifecycleEvent,
     ) -> std::result::Result<(), WaferError> {
+        // Migrations first, through the ledger runner: its error keeps the
+        // runner's classification (a refusal is `FailedPrecondition` and
+        // names what to do), which the deploy report and the boot show.
+        migration_helper::lifecycle_init(ctx, &event, &migrations::MIGRATIONS).await?;
         if matches!(event.event_type, LifecycleType::Init) {
-            super::migrations::apply(ctx).await.map_err(|e| {
-                WaferError::new(
-                    wafer_run::ErrorCode::Internal,
-                    format!("registry migrations: {e}"),
-                )
-            })?;
             db::seed_reserved_orgs(ctx).await.map_err(|e| {
                 WaferError::new(
                     wafer_run::ErrorCode::Internal,
@@ -158,7 +145,7 @@ impl Block for RegistryBlock {
             // Pre-create the storage folder so the first publish doesn't
             // race on folder creation. Safe on re-run — the helper
             // tolerates "already exists" from every backend we care about.
-            db::ensure_storage_folder(ctx, &self.cfg.storage_key_prefix)
+            db::ensure_storage_folder(ctx, STORAGE_FOLDER)
                 .await
                 .map_err(|e| {
                     WaferError::new(

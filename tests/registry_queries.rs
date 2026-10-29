@@ -1,7 +1,7 @@
 //! Typed query-helper tests for the registry block.
 //!
-//! Boots the registry against an in-memory sqlite context (Task 7's Init
-//! seeds the 4 reserved orgs), inserts a couple of packages + versions, and
+//! Boots the registry against an in-memory sqlite context (its Init seeds
+//! every org in `registry::db::RESERVED_ORGS`), inserts a couple of packages + versions, and
 //! exercises every helper added in Task 8 — `list_packages`, `get_package`,
 //! `get_version`, plus their missing-row branches.
 

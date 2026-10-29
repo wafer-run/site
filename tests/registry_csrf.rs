@@ -14,6 +14,9 @@
 //! requests authenticated by an `Authorization: Bearer` credential (a PAT or
 //! an impresspress access token — neither of which a cross-site page can
 //! attach), must still work.
+//!
+//! The same boot also checks that a site with none of the registry's
+//! variables set is healthy (`/_health` is 200): they are all optional.
 
 mod common;
 
@@ -44,13 +47,8 @@ struct Site {
 }
 
 impl Site {
-    async fn boot() -> Site {
-        // The registry block reads its admin email from the process
-        // environment (see `register_post_build_for_site`). This binary
-        // holds this one test, so nothing else observes the write.
-        std::env::set_var("WAFER_RUN__REGISTRY__ADMIN_EMAIL", ADMIN_EMAIL);
-        std::env::remove_var("WAFER_RUN__REGISTRY__REQUIRED_AUTH_METHOD");
-
+    /// Boot the site; with `admin_email`, set it as the registry admin.
+    async fn boot(admin_email: Option<&str>) -> Site {
         let tmp = tempfile::tempdir().expect("tempdir");
         let storage_root = tmp.path().join("storage");
         std::fs::create_dir_all(&storage_root).expect("create storage root");
@@ -76,15 +74,29 @@ impl Site {
                 .expect("construct sqlite database service");
         let wafer = impresspress_server::start_native(
             &infra,
-            database,
+            database.clone(),
             &HashMap::new(),
             Default::default(),
-            false,
             wafer_site::flows::site::FLOW_ID,
             wafer_site::native_app_hooks().expect("the site's hooks"),
         )
         .await
         .expect("the site starts");
+
+        // The registry admin email is a variables-table row, written the way
+        // the admin Variables page writes it; the registry reads it per
+        // request through the config service.
+        if let Some(admin_email) = admin_email {
+            impresspress_core::platform_state::variables::set_by_admin(
+                &database,
+                wafer_site::blocks::registry::config::ADMIN_EMAIL_KEY,
+                admin_email,
+                Some(false),
+                impresspress_core::features::USER_EDITED_SENTINEL,
+            )
+            .await
+            .expect("set the registry admin email");
+        }
 
         let site = Site {
             base: format!("http://127.0.0.1:{port}"),
@@ -215,7 +227,7 @@ fn cli_code(html: &str) -> String {
 
 #[tokio::test]
 async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
-    let site = Site::boot().await;
+    let site = Site::boot(Some(ADMIN_EMAIL)).await;
     let (cookie, access_token) = site.sign_up_admin().await;
     let own_origin = site.base.clone();
 
@@ -271,7 +283,7 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
         "a cross-site cookie publish is refused: {body}"
     );
     assert!(
-        body.contains("cross-origin request blocked"),
+        body.contains(impresspress_core::csrf::ORIGIN_BLOCKED_REASON),
         "refused by the CSRF policy, not by the registry: {body}"
     );
     assert!(!published(&versions(&site).await, "0.3.0"));
@@ -417,4 +429,43 @@ async fn cookie_authenticated_registry_mutations_are_csrf_protected() {
     assert!(yanked(&versions, "0.1.0"));
 
     site.wafer.shutdown().await;
+}
+
+/// A deployment that has set none of the registry's variables — wafer.run
+/// right after its database is created, before a first admin exists — is
+/// healthy: the three keys are optional, so `/_health` (the deploy script's
+/// rollback gate and a deploy smoke path) answers 200 and the registry
+/// serves, with publishing closed.
+#[tokio::test]
+async fn the_site_is_healthy_with_no_registry_config() {
+    let site = Site::boot(None).await;
+
+    let (status, body) = status_and_body(
+        site.client
+            .get(site.url("/_health"))
+            .send()
+            .await
+            .expect("health"),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let report: serde_json::Value = serde_json::from_str(&body).expect("health JSON");
+    assert_eq!(report["broken"], serde_json::json!([]), "{body}");
+    assert!(
+        report["ok"]
+            .as_array()
+            .expect("ok list")
+            .contains(&serde_json::json!(wafer_site::blocks::registry::NAME)),
+        "{body}"
+    );
+
+    let (status, body) = status_and_body(
+        site.client
+            .get(site.url("/registry/search"))
+            .send()
+            .await
+            .expect("search"),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
 }

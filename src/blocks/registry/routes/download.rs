@@ -12,11 +12,11 @@
 
 use wafer_run::{Context, Message, OutputStream};
 
-use crate::blocks::registry::{db, routes::resp, RegistryConfig};
+use crate::blocks::registry::{db, routes::resp, STORAGE_FOLDER};
 
 /// `GET /registry/download/{org}/{name}/{version}.wafer` — stream the
 /// uploaded tarball back to the caller.
-pub async fn get(ctx: &dyn Context, msg: &Message, cfg: &RegistryConfig) -> OutputStream {
+pub async fn get(ctx: &dyn Context, msg: &Message) -> OutputStream {
     let Some(tail) = msg.path().strip_prefix("/registry/download/") else {
         return resp::bad_request("Expected /registry/download/{org}/{name}/{version}.wafer");
     };
@@ -33,12 +33,11 @@ pub async fn get(ctx: &dyn Context, msg: &Message, cfg: &RegistryConfig) -> Outp
         Err(e) => return resp::internal(&format!("get_version: {e}")),
     };
 
-    // Read the tarball bytes from the configured folder. Storage read
+    // Read the tarball bytes from `STORAGE_FOLDER`. Storage read
     // failure maps to 404 — if the DB row exists but the blob doesn't, the
     // version is effectively unavailable. (That shouldn't happen in a
     // healthy deploy; the publish endpoint has a compensating delete.)
-    match wafer_core::clients::storage::get(ctx, &cfg.storage_key_prefix, &detail.storage_key).await
-    {
+    match wafer_core::clients::storage::get(ctx, STORAGE_FOLDER, &detail.storage_key).await {
         Ok((bytes, _info)) => resp::binary_response(
             200,
             bytes,

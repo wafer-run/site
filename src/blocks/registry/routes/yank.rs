@@ -16,17 +16,12 @@
 use serde_json::json;
 use wafer_run::{Context, InputStream, Message, OutputStream};
 
-use crate::blocks::registry::{auth, db, routes::resp, RegistryConfig};
+use crate::blocks::registry::{auth, db, routes::resp};
 
 /// `POST /registry/api/packages/{org}/{name}/{version}/yank` — mark a
 /// version yanked. Body: `{"reason": "<optional>"}`.
-pub async fn yank(
-    ctx: &dyn Context,
-    msg: &Message,
-    input: InputStream,
-    cfg: &RegistryConfig,
-) -> OutputStream {
-    if let Err(out) = auth::require_admin(ctx, msg, cfg).await {
+pub async fn yank(ctx: &dyn Context, msg: &Message, input: InputStream) -> OutputStream {
+    if let Err(out) = auth::require_admin(ctx, msg).await {
         return out;
     }
     let Some((org, name, version)) = parse_path(msg.path(), "/yank") else {
@@ -57,13 +52,8 @@ pub async fn yank(
 
 /// `POST /registry/api/packages/{org}/{name}/{version}/unyank` — clear the
 /// yanked flag. No body required.
-pub async fn unyank(
-    ctx: &dyn Context,
-    msg: &Message,
-    _input: InputStream,
-    cfg: &RegistryConfig,
-) -> OutputStream {
-    if let Err(out) = auth::require_admin(ctx, msg, cfg).await {
+pub async fn unyank(ctx: &dyn Context, msg: &Message, _input: InputStream) -> OutputStream {
+    if let Err(out) = auth::require_admin(ctx, msg).await {
         return out;
     }
     let Some((org, name, version)) = parse_path(msg.path(), "/unyank") else {

@@ -32,10 +32,16 @@ pub const VERSIONS: &str = "wafer_run__registry__versions";
 pub const CODES: &str = "wafer_run__registry__cli_login_codes";
 pub const TOKENS: &str = "wafer_run__registry__tokens";
 
-/// Reserved org names seeded into `registry_orgs` on block init. Owned by the
+/// Reserved org names seeded into [`ORGS`] on block init. Owned by the
 /// project: external users cannot claim these names. Kept in alphabetical
-/// order to match the test assertion.
-pub const RESERVED_ORGS: &[&str] = &["impresspress", "wafer", "wafer-run"];
+/// order.
+pub const RESERVED_ORGS: &[&str] = &[
+    "impresspress",
+    "solobase",
+    "suppers-ai",
+    "wafer",
+    "wafer-run",
+];
 
 // ---- Init / seed -----------------------------------------------------------
 
@@ -122,16 +128,14 @@ fn eq(field: &str, value: serde_json::Value) -> Filter {
 
 /// Tolerant i64 extraction.
 ///
-/// SQLite stores `DATETIME` and `INTEGER` columns as their native types when
-/// the schema was declared via `CollectionSchema`, but falls back to `TEXT`
-/// when a table is auto-created from raw `db::create` data (see
-/// `wafer-block-sqlite::service::ensure_table`). So a value round-tripped
-/// from the DB can come back as either `Number(n)` or `String("n")`. Accept
-/// both.
-fn field_i64(
-    data: &std::collections::HashMap<String, serde_json::Value>,
-    key: &str,
-) -> Option<i64> {
+/// `001_initial_schema` declares the timestamp columns (`expires_at`,
+/// `used_at`, `published_at`, `yanked_at`, and every `created_at` /
+/// `updated_at`) as `TEXT`, while the block writes unix seconds into the
+/// first four. Under `TEXT` affinity SQLite and D1 store the number as text,
+/// and Postgres `TEXT` holds text too, so those come back as
+/// `String("n")`; the `INTEGER` / `BIGINT` columns (`abi`, `size_bytes`)
+/// come back as `Number(n)`. Accept both.
+fn field_i64(data: &db::RecordData, key: &str) -> Option<i64> {
     match data.get(key)? {
         serde_json::Value::Number(n) => n.as_i64(),
         serde_json::Value::String(s) => s.parse::<i64>().ok(),
@@ -140,9 +144,10 @@ fn field_i64(
     }
 }
 
-/// Tolerant bool extraction, same motivation as `field_i64`. `"0"`/`"1"`,
-/// `"true"`/`"false"`, `Bool(_)`, and `Number(0|non-zero)` all decode.
-fn field_bool(data: &std::collections::HashMap<String, serde_json::Value>, key: &str) -> bool {
+/// Tolerant bool extraction. `is_reserved` and `yanked` are `INTEGER` on
+/// SQLite / D1 (read back as `Number(0|1)`) and `BOOLEAN` on Postgres (read
+/// back as `Bool(_)`); `"0"`/`"1"`/`"true"`/`"false"` strings decode too.
+fn field_bool(data: &db::RecordData, key: &str) -> bool {
     match data.get(key) {
         Some(serde_json::Value::Bool(b)) => *b,
         Some(serde_json::Value::Number(n)) => n.as_i64().map(|i| i != 0).unwrap_or(false),
@@ -175,10 +180,10 @@ pub async fn find_package(ctx: &dyn Context, org_id: &str, name: &str) -> Result
 /// Latest non-yanked version for a package, sorted by `published_at` desc.
 /// Returns `None` if the package has no non-yanked versions.
 ///
-/// Yank filtering is done client-side because column affinity differs
-/// between backends (TEXT `"0"` vs INTEGER `0` vs BOOLEAN `false`) and a
-/// server-side `yanked = false` filter misses rows on mismatched backends.
-/// `field_bool` handles all three representations.
+/// Yank filtering is done client-side because the column's type differs
+/// between backends (`INTEGER` `0` on SQLite / D1, `BOOLEAN` `false` on
+/// Postgres), so one server-side `yanked = false` filter value does not match
+/// on both. `field_bool` reads either representation.
 pub async fn latest_version_for(ctx: &dyn Context, package_id: &str) -> Result<Option<Record>> {
     let opts = ListOptions {
         filters: vec![eq("package_id", json!(package_id))],
@@ -407,9 +412,10 @@ pub async fn get_version(
 // collections managed by this block (`CODES` and `TOKENS`) — no raw SQL,
 // everything goes through the typed `db::*` API.
 
-/// Current time as seconds since epoch. Datetime fields on `CollectionSchema`
-/// round-trip as integers in SQLite today (stored as TEXT but decoded by
-/// `field_i64`), so storing `i64` here keeps reads simple.
+/// Current time as seconds since epoch: what the block writes into the
+/// timestamp columns it sets (`expires_at`, `used_at`, `published_at`,
+/// `yanked_at`). `001_initial_schema` declares them `TEXT`, so they are
+/// stored as text and read back through `field_i64`.
 pub fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -441,16 +447,6 @@ pub async fn issue_cli_code(ctx: &dyn Context, user_id: &str, email: &str) -> Re
     data.insert("user_id".into(), json!(user_id));
     data.insert("email".into(), json!(email));
     data.insert("expires_at".into(), json!(expires));
-    // Declare `used_at` explicitly as null at issuance. The sqlite service's
-    // auto-table-creation path (`ensure_table`) builds columns from the keys
-    // of the first-inserted row; if we omit `used_at` here, the column
-    // doesn't exist when `exchange_cli_code` later tries to update it and
-    // sqlite's UPDATE errors with "no such column". Inserting a null value
-    // ensures the column is present from the start. Unrelated to the
-    // `CollectionSchema` declared on the block — the schema only applies
-    // when a manifest-driven runtime materializes it, which our in-memory
-    // test harness skips.
-    data.insert("used_at".into(), serde_json::Value::Null);
 
     db::create(ctx, CODES, data)
         .await
@@ -598,23 +594,17 @@ pub async fn resolve_bearer(
 // ---- Publish helpers ------------------------------------------------------
 //
 // Writes that land a new `{org}/{name}@{version}` row. Every helper goes
-// through the typed `wafer_core::clients::database` API — no raw SQL.
-//
-// Schema-drift note: the in-memory harness auto-creates tables from the
-// first-inserted row's keys. So every nullable `VERSIONS` column
-// (`license`, `readme_md`, `yanked_reason`, `yanked_at`) must be present in
-// the first insert, even when absent from the uploaded manifest. We write
-// `Value::Null` for every one — the production CollectionSchema path
-// tolerates this, and the in-memory path won't drop columns we'll later
-// `update` in the yank flow.
+// through the typed `wafer_core::clients::database` API — no raw SQL. A
+// nullable column the write has no value for is left out: it is declared by
+// `001_initial_schema`, so it exists and reads back `NULL`.
 
 /// Get-or-create an org row by name.
 ///
 /// - If an `orgs` row with `name == org` exists, its id is returned verbatim.
 /// - Otherwise a new row is inserted with `owner_user_id = owner_user_id`
 ///   (stored as a string — the schema declares it that way) and the
-///   requested `is_reserved` flag. Reserved rows get `owner_user_id = null`
-///   so they remain unowned even after a publish.
+///   requested `is_reserved` flag. Reserved rows get no `owner_user_id`
+///   (`NULL`) so they remain unowned even after a publish.
 pub async fn upsert_org(
     ctx: &dyn Context,
     name: &str,
@@ -628,10 +618,8 @@ pub async fn upsert_org(
     data.insert("name".into(), json!(name));
     data.insert("is_reserved".into(), json!(is_reserved));
     // Reserved orgs are project-owned; surface that by leaving the owner
-    // explicitly null rather than pointing at whoever happened to seed them.
-    if is_reserved {
-        data.insert("owner_user_id".into(), serde_json::Value::Null);
-    } else {
+    // unset rather than pointing at whoever happened to seed them.
+    if !is_reserved {
         data.insert("owner_user_id".into(), json!(owner_user_id));
     }
     let row = db::create(ctx, ORGS, data)
@@ -682,11 +670,6 @@ pub async fn is_reserved(ctx: &dyn Context, org_name: &str) -> Result<bool> {
 ///
 /// Dependencies and capabilities are serialized to JSON strings — the
 /// schema declares them as `string` with defaults of `"[]"` / `"{}"`.
-///
-/// Every nullable `VERSIONS` column is written (as `Null` when the manifest
-/// didn't supply a value) to avoid the in-memory harness's schema-drift
-/// trap: auto-created tables pick their columns from the first insert, and
-/// subsequent `update` calls (e.g. yank) need those columns to exist.
 pub async fn insert_version(
     ctx: &dyn Context,
     org_id: &str,
@@ -704,13 +687,9 @@ pub async fn insert_version(
         let mut data: HashMap<String, serde_json::Value> = HashMap::new();
         data.insert("org_id".into(), json!(org_id));
         data.insert("name".into(), json!(pkg_name));
-        data.insert(
-            "summary".into(),
-            match &t.wafer_toml.package.summary {
-                Some(s) => json!(s),
-                None => serde_json::Value::Null,
-            },
-        );
+        if let Some(summary) = &t.wafer_toml.package.summary {
+            data.insert("summary".into(), json!(summary));
+        }
         data.insert("created_by".into(), json!(user_id));
         let row = db::create(ctx, PACKAGES, data)
             .await
@@ -742,26 +721,15 @@ pub async fn insert_version(
     data.insert("sha256".into(), json!(&t.sha256));
     data.insert("storage_key".into(), json!(storage_key));
     data.insert("size_bytes".into(), json!(t.size_bytes as i64));
-    data.insert(
-        "license".into(),
-        match &t.wafer_toml.package.license {
-            Some(s) => json!(s),
-            None => serde_json::Value::Null,
-        },
-    );
-    data.insert(
-        "readme_md".into(),
-        match &t.readme_md {
-            Some(s) => json!(s),
-            None => serde_json::Value::Null,
-        },
-    );
+    if let Some(license) = &t.wafer_toml.package.license {
+        data.insert("license".into(), json!(license));
+    }
+    if let Some(readme_md) = &t.readme_md {
+        data.insert("readme_md".into(), json!(readme_md));
+    }
     data.insert("dependencies".into(), json!(deps_json.to_string()));
     data.insert("capabilities".into(), json!(caps_json.to_string()));
     data.insert("yanked".into(), json!(false));
-    // Nullable fields declared explicitly — see the fn-level doc comment.
-    data.insert("yanked_reason".into(), serde_json::Value::Null);
-    data.insert("yanked_at".into(), serde_json::Value::Null);
     data.insert("published_by".into(), json!(user_id));
     data.insert("published_at".into(), json!(now));
 
@@ -798,10 +766,8 @@ fn toml_to_json(v: &toml::Value) -> serde_json::Value {
 // org → package → version client-side, then updates the version row via the
 // typed `db::update` API.
 //
-// Nullable fields (`yanked_reason`, `yanked_at`) are always written — even as
-// `Value::Null` on unyank — so the in-memory harness's auto-schema path
-// doesn't drop columns out from under us (see `insert_version`'s doc comment
-// for the same drift-guard pattern).
+// `yanked_reason` and `yanked_at` are always written: on unyank as `NULL`,
+// because unyanking must clear what the yank set.
 
 /// Flip the yanked state of `{org}/{name}@{version}`.
 ///

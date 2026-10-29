@@ -2,10 +2,10 @@
 
 use wafer_run::{Context, Message, OutputStream};
 
-use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
+use crate::blocks::registry::{db, routes::resp, templates};
 
 /// GET /registry — registry index page.
-pub async fn index(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> OutputStream {
+pub async fn index(ctx: &dyn Context, msg: &Message) -> OutputStream {
     let q = msg.query("q");
     let query_str = if q.is_empty() { "" } else { q };
     let (packages, total) =
@@ -24,7 +24,7 @@ pub async fn index(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> O
 ///
 /// Page size is currently fixed at 20 rows; can be surfaced as a param
 /// once pagination controls appear in the HTML.
-pub async fn search(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> OutputStream {
+pub async fn search(ctx: &dyn Context, msg: &Message) -> OutputStream {
     let q_raw = msg.query("q");
     let q: Option<&str> = if q_raw.is_empty() { None } else { Some(q_raw) };
     let page: i64 = {
@@ -50,11 +50,7 @@ pub async fn search(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> 
 }
 
 /// GET /registry/{org}/{package} — package detail page.
-pub async fn package_detail(
-    ctx: &dyn Context,
-    msg: &Message,
-    _cfg: &RegistryConfig,
-) -> OutputStream {
+pub async fn package_detail(ctx: &dyn Context, msg: &Message) -> OutputStream {
     let path = msg.path().strip_prefix("/registry/").unwrap_or("");
     let segs: Vec<&str> = path.split('/').collect();
     if segs.len() != 2 {

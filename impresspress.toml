@@ -17,6 +17,18 @@ compatibility_date = "2026-05-01"
 # custom-domain bindings. Must live at the [cloudflare] level (NOT
 # under [cloudflare.r2] — toml section scoping is positional).
 wrangler_overrides_path = "wrangler.overrides.toml"
+# Ordinary application paths `impresspress deploy` requests on the candidate
+# version (through its preview URL) before promoting it: a non-200 on any of
+# them stops the deploy with the live version untouched. They cover the
+# content block's R2 release assets (`/`, `/docs/`), the registry over the
+# migrated database (`/registry`, `/registry/search`) and the config check
+# (`/_health`: 503 when a required config key is unset).
+deploy_smoke_paths = ["/health", "/_health", "/", "/docs/", "/registry", "/registry/search"]
+# `d1_queries_per_invocation` is left at the CLI's default (1000): a fresh
+# database's `/_deploy/prepare` (admin, auth and registry migrations plus the
+# seeds) runs in one invocation well under it.
+# No `crons`: the site exports no `scheduled` handler, so the auth retention
+# sweep is off.
 
 [cloudflare.d1]
 # Binding is a code contract — the worker reads `env.DB`.
@@ -33,3 +45,19 @@ binding     = "STORAGE"
 # Default R2 bucket for the canonical wafer-site deploy.
 # Override with IMPRESSPRESS_CLOUDFLARE_R2_BUCKET_NAME.
 bucket_name = "wafer-site-assets"
+
+[cloudflare.password_hasher]
+# The password-hasher Worker: a second Worker exporting one SQLite-backed
+# Durable Object class that hashes and verifies every password (the main
+# Worker never does; impresspress RELEASE.md, "Cloudflare: passwords are
+# hashed by a password-hasher Worker"). `impresspress deploy` builds and
+# deploys it before the main Worker on every deploy (`--password-hasher
+# deploy`, the default), creating it on the first one, and the main Worker
+# binds it as `IMPRESSPRESS_PASSWORD_HASHER`. Named explicitly, though it is
+# the default (`worker_name` + "-password-hasher"), because it is a Cloudflare
+# resource of its own that runbooks and secrets name.
+worker_name = "wafer-site-password-hasher"
+# shards (default 8) and pepper_required (default false) keep their defaults:
+# no password pepper is configured. A pepper is a secret on this Worker
+# (`npx wrangler@4 secret put IMPRESSPRESS_PASSWORD_PEPPER_KEY --name
+# wafer-site-password-hasher`), never on the main Worker.

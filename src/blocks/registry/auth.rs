@@ -8,14 +8,15 @@
 //!   `auth_token` cookie when the request carries no `Authorization`
 //!   header).
 //! - [`require_admin`] — wraps `require_user` and additionally gates on the
-//!   configured admin email. Non-admins get the "coming-soon" response.
+//!   configured admin email ([`config::ADMIN_EMAIL_KEY`]). Non-admins get
+//!   the "coming-soon" response.
 //!
 //! No raw SQL is used: the PAT lookup goes through
 //! `wafer_core::clients::database::get_by_field`.
 
 use impresspress_core::{
     blocks::auth::{
-        repo::{jwt_blocklist, users},
+        repo::{sessions, users},
         JWT_SECRET_KEY,
     },
     crypto::{expected_issuer, verify_access_token},
@@ -23,7 +24,7 @@ use impresspress_core::{
 use wafer_block::Message;
 use wafer_run::{context::Context, OutputStream, ResourceGrant};
 
-use crate::blocks::registry::{db, routes::resp, templates, RegistryConfig};
+use crate::blocks::registry::{config, db, routes::resp, templates};
 
 /// The authenticated caller, as resolved by [`require_user`].
 ///
@@ -71,8 +72,8 @@ pub struct AuthedUser {
 ///
 /// Returns an `OutputStream` error response on any failure path so callers
 /// can early-return without additional shaping. A check that could not be
-/// completed (a failed blocklist or `auth_version` read) answers with its
-/// error rather than as signed out.
+/// completed (a failed read of the token's session row or of the account's
+/// `auth_version`) answers with its error rather than as signed out.
 pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser, OutputStream> {
     // 1. Try bearer PAT against registry_tokens. This path handles PATs the
     //    registry itself issued via CLI-login exchange. The PAT inherits the
@@ -102,25 +103,23 @@ pub async fn require_user(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser
         .await
         .map_err(OutputStream::error)?;
     match claims {
-        Some(claims) => match claims.sub.filter(|sub| !sub.is_empty()) {
-            Some(id) => Ok(AuthedUser {
-                id,
-                email: claims.email.unwrap_or_default(),
-                auth_method: claims.auth_method,
-            }),
-            None => Err(unauthorized_response()),
-        },
+        Some(claims) => Ok(AuthedUser {
+            id: claims.sub,
+            email: claims.email.unwrap_or_default(),
+            auth_method: claims.auth_method,
+        }),
         None => Err(unauthorized_response()),
     }
 }
 
 /// The reads [`verify_access_token`] makes, granted to the registry block:
-/// the JWT blocklist (a logged-out token) and the users table (a token
-/// minted before the user's `auth_version` moved). The same two reads the
+/// the sessions table (the token's login family must still have a live
+/// session row; signing out deletes it) and the users table (a token minted
+/// before the user's `auth_version` moved). The same two reads the
 /// `impresspress/router` block is granted for the same check.
 pub fn auth_table_grants() -> Vec<ResourceGrant> {
     vec![
-        ResourceGrant::read(super::NAME, jwt_blocklist::TABLE),
+        ResourceGrant::read(super::NAME, sessions::TABLE),
         ResourceGrant::read(super::NAME, users::TABLE),
     ]
 }
@@ -149,33 +148,38 @@ fn find_jwt_token(msg: &Message) -> Option<String> {
 /// - `coming-soon` template/JSON when the caller's email isn't the admin
 ///   email (current default for non-admins).
 /// - `auth-method-required` JSON / HTML when the email matches but the
-///   auth method doesn't satisfy [`RegistryConfig::required_auth_method`].
+///   auth method doesn't satisfy [`config::REQUIRED_AUTH_METHOD_KEY`].
 ///   This separates "you're not allowed" from "log in via the right
 ///   method" so the CLI / admin can react correctly.
 ///
-/// Empty/missing email is treated as "not admin".
-pub async fn require_admin(
-    ctx: &dyn Context,
-    msg: &Message,
-    cfg: &RegistryConfig,
-) -> Result<AuthedUser, OutputStream> {
+/// Both keys are read per request through the config service, so an edit on
+/// the admin Variables page applies to the next request. A read that fails
+/// answers with its error rather than as "not admin".
+pub async fn require_admin(ctx: &dyn Context, msg: &Message) -> Result<AuthedUser, OutputStream> {
     let user = require_user(ctx, msg).await?;
-    let is_admin_email =
-        !user.email.is_empty() && user.email.eq_ignore_ascii_case(&cfg.admin_email);
-    if !is_admin_email {
+    let admin_email = config::admin_email(ctx)
+        .await
+        .map_err(OutputStream::error)?;
+    if !is_admin_email(&user.email, &admin_email) {
         return Err(coming_soon_response(msg));
     }
-    if !cfg.required_auth_method.is_empty()
-        && !user
-            .auth_method
-            .eq_ignore_ascii_case(&cfg.required_auth_method)
+    let required_auth_method = config::required_auth_method(ctx)
+        .await
+        .map_err(OutputStream::error)?;
+    if !required_auth_method.is_empty()
+        && !user.auth_method.eq_ignore_ascii_case(&required_auth_method)
     {
-        return Err(auth_method_required_response(
-            msg,
-            &cfg.required_auth_method,
-        ));
+        return Err(auth_method_required_response(msg, &required_auth_method));
     }
     Ok(user)
+}
+
+/// Whether `email` is the configured registry admin's, `admin_email`. An
+/// empty address on either side is never the admin: an unset
+/// [`config::ADMIN_EMAIL_KEY`] closes publishing, and a token without an
+/// email claim names nobody.
+pub fn is_admin_email(email: &str, admin_email: &str) -> bool {
+    !email.is_empty() && email.eq_ignore_ascii_case(admin_email)
 }
 
 fn coming_soon_response(msg: &Message) -> OutputStream {

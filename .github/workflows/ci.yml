@@ -10,11 +10,14 @@ on:
 # the site's CI verdict changes only when this file does: bump a pin in the
 # same PR that adapts the site to it. Cargo.toml's [patch] table points
 # impresspress's git-pinned wafer-run crates at the same wafer-run checkout,
-# so IMPRESSPRESS_REF must build against WAFER_RUN_REF.
+# so IMPRESSPRESS_REF must build against WAFER_RUN_REF. Cargo.lock is
+# committed and every cargo step runs `--locked`; Cargo.toml's js-sys
+# `[patch.crates-io]` rev and rust-toolchain.toml's channel follow
+# IMPRESSPRESS_REF's own, so bump them with it.
 env:
-  WAFER_RUN_REF: 914a0aad82a5e6af95a124de6ad841943499a5ad
+  WAFER_RUN_REF: 1272fd638ca23b5b790c1b875412310ff1a093ad
   IMPRESSPRESS_REPO: impresspress/impresspress
-  IMPRESSPRESS_REF: 18205caa7cacf07bab7cc23b0ebcf5d1e8cac575
+  IMPRESSPRESS_REF: 75782e2a2c5333372524cd5c3ee1fce878c961f7
 
 jobs:
   rust:
@@ -36,26 +39,28 @@ jobs:
           repository: ${{ env.IMPRESSPRESS_REPO }}
           ref: ${{ env.IMPRESSPRESS_REF }}
           path: impresspress
-      - name: Set site env
-        run: |
-          echo "WAFER_RUN__AUTH__JWT_SECRET=ci-test-secret-not-for-prod-padding-to-pass-length-check" >> $GITHUB_ENV
-          echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
-          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
-          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
-          echo "WAFER_RUN_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
+      # A bare install reads site/rust-toolchain.toml: the pinned channel,
+      # clippy, rustfmt and the wasm32-unknown-unknown target.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        working-directory: site
+        run: rustup toolchain install
       - name: cargo fmt --check
         working-directory: site
         run: cargo fmt --check
       - name: cargo clippy
         working-directory: site
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
+      # The Cloudflare Worker build (`target-cloudflare`, wasm32): the lane
+      # that catches a `worker` crate split from impresspress-cloudflare's,
+      # which the native build never compiles.
+      - name: cargo clippy (Cloudflare, wasm32)
+        working-directory: site
+        run: >-
+          cargo clippy --locked --lib --target wasm32-unknown-unknown
+          --no-default-features --features target-cloudflare -- -D warnings
       - name: cargo test
         working-directory: site
-        run: cargo test
+        run: cargo test --locked
 
   playwright:
     runs-on: ubuntu-latest
@@ -77,22 +82,16 @@ jobs:
           repository: ${{ env.IMPRESSPRESS_REPO }}
           ref: ${{ env.IMPRESSPRESS_REF }}
           path: impresspress
-      - name: Set site env
-        run: |
-          echo "WAFER_RUN__AUTH__JWT_SECRET=ci-test-secret-not-for-prod-padding-to-pass-length-check" >> $GITHUB_ENV
-          echo "WAFER_RUN__REGISTRY__ADMIN_EMAIL=ci-admin@example.com" >> $GITHUB_ENV
-          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_ID=ci-dummy" >> $GITHUB_ENV
-          echo "WAFER_RUN_SHARED__AUTH__GITHUB__CLIENT_SECRET=ci-dummy" >> $GITHUB_ENV
-          echo "WAFER_RUN_SHARED__AUTH__GITHUB__REDIRECT_URL=http://localhost:8090/b/auth/callback/github" >> $GITHUB_ENV
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        working-directory: site
+        run: rustup toolchain install
       - name: Install Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
       - name: cargo build --release
         working-directory: site
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: npm ci
         working-directory: site
         run: npm ci

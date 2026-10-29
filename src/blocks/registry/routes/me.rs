@@ -11,15 +11,20 @@
 use serde_json::json;
 use wafer_run::{Context, Message, OutputStream};
 
-use crate::blocks::registry::{auth, routes::resp, RegistryConfig};
+use crate::blocks::registry::{auth, config, routes::resp};
 
 /// `GET /registry/api/me` — identity + admin flag for the caller.
-pub async fn get(ctx: &dyn Context, msg: &Message, cfg: &RegistryConfig) -> OutputStream {
-    match auth::require_user(ctx, msg).await {
-        Ok(u) => resp::ok_json(&json!({
-            "email": u.email,
-            "is_admin": !u.email.is_empty() && u.email.eq_ignore_ascii_case(&cfg.admin_email),
-        })),
-        Err(out) => out,
-    }
+pub async fn get(ctx: &dyn Context, msg: &Message) -> OutputStream {
+    let user = match auth::require_user(ctx, msg).await {
+        Ok(u) => u,
+        Err(out) => return out,
+    };
+    let admin_email = match config::admin_email(ctx).await {
+        Ok(email) => email,
+        Err(e) => return OutputStream::error(e),
+    };
+    resp::ok_json(&json!({
+        "email": user.email,
+        "is_admin": auth::is_admin_email(&user.email, &admin_email),
+    }))
 }

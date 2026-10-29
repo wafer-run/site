@@ -62,7 +62,10 @@ impresspress-server     = { path = "../impresspress/crates/impresspress-server",
 impresspress-cloudflare = { path = "../impresspress/crates/impresspress-cloudflare", optional = true }
 
 # Cloudflare-only deps (gated behind target-cloudflare).
-worker       = { version = "0.7.5", features = ["d1"], optional = true }
+# Moves in lockstep with impresspress-cloudflare's: worker-build 0.8.7 refuses
+# `worker` 0.7, and two `worker` crates in one build do not type-check
+# (impresspress RELEASE.md, "Cloudflare: workers-rs 0.8.7").
+worker       = { version = "0.8.7", features = ["d1"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 # Registry block support
@@ -116,14 +119,31 @@ manual_let_else = "warn"
 unused_must_use = "warn"
 
 # wasm32-cloudflare cold-start sits near the 400ms platform startup-CPU cap;
-# size opts win. Mirrors impresspress/Cargo.toml's release profile with
-# `panic = "abort"` added — Workers retries on isolate crash anyway.
+# size opts win. Mirrors impresspress/Cargo.toml's release profile.
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
+# The Cloudflare Worker build overrides `strip` and removes the names section
+# itself (`WORKER_BUILD_STRIP_ENV` in impresspress's
+# `crates/impresspress/src/cli/helpers/cloudflare/build.rs` says why); the
+# native release binary uses this setting.
 strip = true
 panic = "abort"
+
+# The js-sys `[patch]` impresspress's workspace carries, copied here because a
+# `[patch]` does not reach another workspace: without it this Worker links
+# stock js-sys, where a request Cloudflare stops at its CPU limit in the
+# middle of a poll can leave the executor every request in the wasm instance
+# shares never polling again ("code had hung" at ~0 ms CPU). impresspress
+# RELEASE.md, "Cloudflare: a request stopped at its CPU limit no longer stops
+# the isolate's later requests", and the comment above impresspress's own
+# `[patch.crates-io]` say what the fork is and when it goes.
+#
+# Keep `rev` equal to impresspress's at IMPRESSPRESS_REF (.github/workflows/
+# ci.yml): bump it in the same PR that bumps that pin.
+[patch.crates-io]
+js-sys = { git = "https://github.com/impresspress/js-sys", rev = "db85a1cb2b4ff9f651081b1cd688e39f2babc992" }
 
 [patch."https://github.com/wafer-run/wafer-run"]
 wafer-run                   = { path = "../wafer-run/crates/wafer-run" }

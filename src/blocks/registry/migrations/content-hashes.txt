@@ -1,0 +1,7 @@
+# Content hashes of the shipped registry migration files, one
+# `<basename>.<dialect> <hash>` per line (impresspress
+# `migration_helper::content_hash`: the file's statements, comment lines
+# excluded). tests/registry_migrations.rs checks them. A shipped file is
+# frozen: a schema change is a new numbered file and a new line here.
+001_initial_schema.sqlite f08640683d9053824bf8f72046a2e23224d4941b8040ff0c055f826448cf152c
+001_initial_schema.postgres 6b5409532434ab5201b0a2bd2e3dc41d872757825c262e769973431f26331a0a

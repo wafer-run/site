@@ -10,13 +10,13 @@
 
 use wafer_run::{Context, Message, OutputStream};
 
-use crate::blocks::registry::{db, routes::resp, RegistryConfig};
+use crate::blocks::registry::{db, routes::resp};
 
 /// Dispatch both `/registry/api/packages/{org}/{block}` and
 /// `/registry/api/packages/{org}/{block}/{ver}`. The route handler in
 /// `handlers.rs` only matches the `/registry/api/packages/` prefix — the
 /// concrete arity is decided here by splitting the suffix.
-pub async fn get(ctx: &dyn Context, msg: &Message, _cfg: &RegistryConfig) -> OutputStream {
+pub async fn get(ctx: &dyn Context, msg: &Message) -> OutputStream {
     let segments: Vec<&str> = msg
         .path()
         .strip_prefix("/registry/api/packages/")
