@@ -195,7 +195,9 @@ fn block_settings_for_site() -> BlockSettings {
 /// infrastructure config, the platform services, the variables and
 /// block-settings tables, `build()`, the admin-first boot (which applies
 /// every block's pending migrations, and refuses to start if one fails) and
-/// the HTTP listener. The site adds itself through the same two hooks the
+/// the HTTP listener. It also refuses to start when `.env` exists but cannot
+/// be loaded. The listen address is `IMPRESSPRESS_LISTEN`'s: this binary
+/// passes no port override (the `impresspress serve --port` flag). The site adds itself through the same two hooks the
 /// Cloudflare entry passes to `impresspress_cloudflare::run_with_config` —
 /// [`register_blocks_for_site`] and [`register_post_build_for_site`] — and
 /// points the listener at the `wafer-site-main` flow.
@@ -209,6 +211,7 @@ pub async fn run() -> anyhow::Result<()> {
         std::path::Path::new("."),
         flows::site::FLOW_ID,
         native_app_hooks()?,
+        None,
     )
     .await
 }
@@ -245,12 +248,19 @@ pub fn native_app_hooks() -> anyhow::Result<impresspress_server::AppHooks> {
 /// On Cloudflare a `WAFER_RUN_SHARED__*` key is read from D1's variables
 /// table, which an admin edits and which has no rows before the first deploy
 /// creates it. Request config is how a consumer hands its blocks a Worker
-/// secret instead. With it set, the auth block's `Init` in the first
-/// `/_deploy/prepare` on an empty users table stores the token's hash with a
-/// 24-hour expiry; its holder then creates the first admin on the
-/// `/b/auth/bootstrap` page with an email and password they type
+/// secret instead. With it set and the users table empty, the first auth
+/// `Init` that sees it (the first `/_deploy/prepare`) installs the token's
+/// row — its hash, with a 24-hour expiry — and every later runtime build
+/// (verify, each isolate) finds that row and leaves it as it is, so the 24
+/// hours run from the first install. Its holder then creates the first admin
+/// on the `/b/auth/bootstrap` page with an email and password they type
 /// themselves. Once any account exists the value is ignored, and the secret
 /// can be deleted.
+///
+/// Deleting or changing the secret does not revoke an installed row: a
+/// different token installs a row of its own beside it, and the earlier one
+/// stays redeemable (and an admin bearer) until it expires — a gap
+/// impresspress tracks separately. Redeeming is what ends a token.
 ///
 /// The token path only: the email + password bootstrap would put the
 /// admin's password in a Worker secret.

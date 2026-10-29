@@ -67,9 +67,9 @@ On Cloudflare every setting is a row of D1's variables table, and only an admin 
    token=$(openssl rand -hex 32); echo "$token"   # keep it to redeem
    printf '%s' "$token" | npx wrangler@4 secret put WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_TOKEN --name wafer-site
    ```
-2. Deploy. The first `/_deploy/prepare` stores the token's hash for 24 hours.
+2. Deploy. The first `/_deploy/prepare` installs the token's row (its hash, with a 24-hour expiry). Every later runtime build — `/_deploy/verify`, each isolate — finds that row and leaves it as it is, so the 24 hours run from that first install.
 3. Redeem it within those 24 hours: open `https://wafer.run/b/auth/bootstrap`, paste the token, and choose an email you own and a password (the form posts to `/b/auth/api/bootstrap`, which creates the admin and signs you in).
-4. Delete the secret: `npx wrangler@4 secret delete WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_TOKEN --name wafer-site`. This stops the token being installed again on a fresh database; it does **not** revoke a token already installed. Until it is redeemed (or its 24 hours run out), the stored token is itself an admin credential — the auth block accepts it as a bearer for admin routes — so treat it as an admin password, redeem it promptly, and never delete the secret instead of redeeming.
+4. Delete the secret: `npx wrangler@4 secret delete WAFER_RUN_SHARED__AUTH__BOOTSTRAP_ADMIN_TOKEN --name wafer-site`. This stops the token being installed again on a fresh database; it does **not** revoke a token already installed. Until it is redeemed (or its 24 hours run out), the stored token is itself an admin credential — the auth block accepts it as a bearer for admin routes — so treat it as an admin password, redeem it promptly, and never delete the secret instead of redeeming. Changing the secret does not cancel it either: a different token installs a second row and the first stays redeemable — even after an admin exists, which would mint a second admin — until it expires (a gap tracked in impresspress). Redeeming is the one thing that spends a token, so set one token, once.
 5. Signed in as that admin, on the Variables page:
    - `WAFER_RUN_SHARED__FRONTEND_URL` = `https://wafer.run` (it is the access-token issuer, so everyone signs in again);
    - `WAFER_RUN_SHARED__ALLOW_SIGNUP` = `false` (seeded `true`);
