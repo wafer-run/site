@@ -6,7 +6,10 @@
 //!
 //! The site's own health block is dispatched through a real runtime whose
 //! config source answers per block, so the report it serves is the one
-//! wafer-run's validator builds from those answers.
+//! wafer-run's validator builds from those answers. Each answer is also put
+//! through the deploy script's post-promotion gate
+//! (`health_gate_verdict`, scripts/lib/deploy-checks.sh): only the
+//! transient case keeps the new version live without rolling back.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -100,9 +103,33 @@ impl Block for DeclaringBlock {
     }
 }
 
+/// What `scripts/deploy-cloudflare.sh`'s post-promotion gate decides for
+/// this `/_health` answer.
+fn gate_verdict(status: &str, raw_body: &str) -> String {
+    let lib = concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/lib/deploy-checks.sh");
+    let body = tempfile::NamedTempFile::new().expect("body file");
+    std::fs::write(body.path(), raw_body).expect("write the body");
+    let out = std::process::Command::new("bash")
+        .args([
+            "-c",
+            r#"source "$1" && health_gate_verdict "$2" "$3""#,
+            "bash",
+            lib,
+            status,
+        ])
+        .arg(body.path())
+        .output()
+        .expect("run bash");
+    assert!(out.status.success(), "{out:?}");
+    String::from_utf8(out.stdout)
+        .expect("UTF-8")
+        .trim()
+        .to_string()
+}
+
 /// Dispatch `wafer-site/health` on a runtime whose source answers `answer`,
-/// returning the response status and JSON body.
-async fn health_with(answer: Answer) -> (String, serde_json::Value) {
+/// returning the response status, JSON body and the deploy gate's verdict.
+async fn health_with(answer: Answer) -> (String, serde_json::Value, String) {
     // Only the two blocks under test: the blocks the test binary links
     // (impresspress's, wafer-run's web block) would need a storage service.
     let mut wafer = Wafer::builder()
@@ -135,13 +162,15 @@ async fn health_with(answer: Answer) -> (String, serde_json::Value) {
         !raw.contains(SOURCE_TEXT),
         "the source's error text must stay out of the body: {raw}"
     );
+    let verdict = gate_verdict(&status, &raw);
     let body = serde_json::from_str(&raw).expect("JSON body");
-    (status, body)
+    (status, body, verdict)
 }
 
 #[tokio::test]
 async fn a_source_that_answers_is_healthy() {
-    let (status, body) = health_with(Answer::Ok).await;
+    let (status, body, verdict) = health_with(Answer::Ok).await;
+    assert_eq!(verdict, "healthy", "{body}");
     assert_eq!(status, "200", "{body}");
     assert_eq!(
         body,
@@ -156,7 +185,8 @@ async fn a_source_that_answers_is_healthy() {
 
 #[tokio::test]
 async fn a_missing_required_key_is_broken() {
-    let (status, body) = health_with(Answer::Missing).await;
+    let (status, body, verdict) = health_with(Answer::Missing).await;
+    assert_eq!(verdict, "rollback", "{body}");
     assert_eq!(status, "503", "{body}");
     assert_eq!(
         body,
@@ -171,7 +201,8 @@ async fn a_missing_required_key_is_broken() {
 
 #[tokio::test]
 async fn an_unreachable_source_is_degraded_and_unhealthy() {
-    let (status, body) = health_with(Answer::Transient).await;
+    let (status, body, verdict) = health_with(Answer::Transient).await;
+    assert_eq!(verdict, "outage", "{body}");
     assert_eq!(status, "503", "{body}");
     assert_eq!(
         body,
@@ -186,7 +217,8 @@ async fn an_unreachable_source_is_degraded_and_unhealthy() {
 
 #[tokio::test]
 async fn a_source_fault_is_failed_and_unhealthy() {
-    let (status, body) = health_with(Answer::SourceFault).await;
+    let (status, body, verdict) = health_with(Answer::SourceFault).await;
+    assert_eq!(verdict, "rollback", "{body}");
     assert_eq!(status, "503", "{body}");
     assert_eq!(
         body,

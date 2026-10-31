@@ -22,17 +22,32 @@
 //!   reason that clears on its own (`UnavailableReason::Transient`: D1
 //!   unreachable, overloaded or over a quota that resets).
 //! - `failed`: blocks whose config the source answered with an error
-//!   retrying cannot fix (`UnavailableReason::SourceFault`: a missing or
-//!   malformed variables table).
+//!   retrying cannot fix (`UnavailableReason::SourceFault`). Only a source
+//!   that classifies its failures reports this. impresspress's Cloudflare
+//!   `D1ConfigSource` reports every D1 failure as `Transient` until it
+//!   classifies them (IP-A), so today a missing variables table shows as
+//!   `degraded` and `failed` stays empty.
 //!
 //! 200 OK only when `broken`, `degraded` and `failed` are all empty; any
 //! entry in one of them is 503 Service Unavailable. A config source that
-//! cannot answer is never healthy: the blocks it serves cannot init.
+//! cannot answer is never healthy: config reads, and the runtime rebuilds
+//! that need them, fail until it answers.
 //! The body names classes only; the source's own error text (which may
 //! quote D1) goes to the log, never to this public route.
 //!
-//! Deploy scripts gate post-deploy rollback on a 200 response, so a deploy
-//! during a D1 outage fails its gate by design.
+//! ## Who reads it
+//!
+//! - `impresspress deploy` requests it on the candidate version before
+//!   promoting it (`deploy_smoke_paths` in `impresspress.toml`). A non-200
+//!   stops the deploy with the live version untouched. A D1 outage that is
+//!   already underway stops a deploy there, or earlier, at
+//!   `/_deploy/prepare`.
+//! - `scripts/deploy-cloudflare.sh` requests it once after promotion. It
+//!   rolls back when the body shows a fault of the deploy (`broken` or
+//!   `failed` entries, or not this body at all). A 503 with only `degraded`
+//!   entries is a D1 outage that began after promotion and says nothing
+//!   about the new version: the script reports it and exits non-zero
+//!   without rolling back.
 
 use std::sync::Arc;
 

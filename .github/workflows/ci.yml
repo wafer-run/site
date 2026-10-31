@@ -39,6 +39,11 @@ jobs:
           repository: ${{ env.IMPRESSPRESS_REPO }}
           ref: ${{ env.IMPRESSPRESS_REF }}
           path: impresspress
+      # The check deploy-cloudflare.sh runs before it builds, on the layout
+      # it was written for: proves it parses this file's pins.
+      - name: Sibling checkouts at the pins
+        working-directory: site
+        run: bash -c 'source scripts/lib/deploy-checks.sh && check_sibling_pins "$PWD"'
       # A bare install reads site/rust-toolchain.toml: the pinned channel,
       # clippy, rustfmt and the wasm32-unknown-unknown target.
       - name: Install Rust toolchain
