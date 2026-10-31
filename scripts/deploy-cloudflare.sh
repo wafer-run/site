@@ -17,6 +17,10 @@
 #      Use the CLI from the impresspress commit this site pins
 #      (IMPRESSPRESS_REF in .github/workflows/ci.yml): a CLI and a Worker from
 #      different releases refuse each other.
+#   7. ../wafer-run and ../impresspress checked out, clean, at WAFER_RUN_REF
+#      and IMPRESSPRESS_REF (.github/workflows/ci.yml). `build` and `deploy`
+#      refuse to run otherwise (check_sibling_pins, scripts/lib/
+#      deploy-checks.sh).
 #
 # Usage:
 #   ./scripts/deploy-cloudflare.sh                    # build + deploy
@@ -50,6 +54,24 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 SITE_ROOT=$(pwd)
+. "$SITE_ROOT/scripts/lib/deploy-checks.sh"
+
+cmd=${1:-deploy}
+
+# ── Sibling checkouts at the CI pins ─────────────────────────────────
+# Before anything builds: the Worker is built from ../wafer-run and
+# ../impresspress, so they must be the commits CI tested.
+if [[ "$cmd" == "build" || "$cmd" == "deploy" ]]; then
+  if ! check_sibling_pins "$SITE_ROOT"; then
+    echo "error: refusing to $cmd: the sibling checkouts are not at the pins in .github/workflows/ci.yml" >&2
+    exit 1
+  fi
+  echo "siblings at the ci.yml pins"
+fi
+if [[ "$cmd" == "deploy" ]] && ! command -v jq >/dev/null 2>&1; then
+  echo "error: the post-deploy /_health gate needs jq" >&2
+  exit 1
+fi
 
 ENV_FILE=${ENV_FILE:-.env}
 
@@ -93,7 +115,6 @@ echo "using impresspress: $IMPRESSPRESS_BIN"
 
 WRANGLER_TOML="$SITE_ROOT/target/impresspress-cloudflare/wrangler.toml"
 
-cmd=${1:-deploy}
 case "$cmd" in
   build)
     "$IMPRESSPRESS_BIN" build --target cloudflare
@@ -103,29 +124,54 @@ case "$cmd" in
     "$IMPRESSPRESS_BIN" deploy --target cloudflare
 
     # Post-deploy health gate. `/_health` (wafer-site/health block) walks
-    # every registered block's `ConfigVar` declarations and 503s if any
-    # required key is unset (the registry's keys are all optional, so an
-    # unset registry admin email is not one). Roll back on non-200 so a
-    # misconfigured deploy doesn't sit live: `wrangler rollback` returns to
-    # the previous version, which on a first deploy is the CLI's 503
-    # placeholder.
+    # every registered block's `ConfigVar` declarations through the config
+    # source (D1) and answers 503 when a required key is unset (`broken`;
+    # the registry's keys are all optional, so an unset registry admin email
+    # is not one), the source faults (`failed`) or the source fails
+    # transiently (`degraded`).
+    #
+    # A D1 outage already underway never reaches this gate: `impresspress
+    # deploy` stops at `/_deploy/prepare` or at the candidate smoke
+    # (impresspress.toml `deploy_smoke_paths`), before promotion, with the
+    # live version untouched. Here, after promotion:
+    #   - `broken` or `failed` entries, another status, or a body that is not
+    #     the health block's: the new version is at fault, so roll back
+    #     (`wrangler rollback` returns to the previous version, which on a
+    #     first deploy is the CLI's 503 placeholder);
+    #   - a 503 with only `degraded` entries: an outage that began after
+    #     promotion. It says nothing about the new version and the previous
+    #     one would answer the same, so keep it, report and exit non-zero.
     #
     # HEALTH_URL overrides the default wafer.run URL for canary /
     # staging environments. HEALTH_SKIP=1 disables the gate (e.g. when
     # deploying a brand-new worker whose DNS hasn't propagated yet).
     if [[ "${HEALTH_SKIP:-0}" != "1" ]]; then
       health_url=${HEALTH_URL:-https://wafer.run/_health}
+      health_body=$(mktemp)
+      trap 'rm -f "$health_body"' EXIT
       echo
       echo "Waiting for new version to propagate before /_health check…"
       sleep 5
-      status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$health_url" || echo "000")
-      if [[ "$status" != "200" ]]; then
-        echo "error: $health_url returned $status — rolling back" >&2
-        npx wrangler@4 rollback --config "$WRANGLER_TOML" \
-          --message "post-deploy /_health failed (status: $status)" || true
-        exit 1
-      fi
-      echo "$health_url: 200 — deploy complete"
+      # On a connection failure curl still writes "000" for %{http_code}.
+      status=$(curl -s -o "$health_body" -w "%{http_code}" --max-time 30 "$health_url") || true
+      case "$(health_gate_verdict "$status" "$health_body")" in
+        healthy)
+          echo "$health_url: 200 — deploy complete"
+          ;;
+        outage)
+          echo "error: $health_url returned $status: the config source (D1) is failing transiently" >&2
+          echo "       for $(jq -c .degraded "$health_body"). The new version stays live; check D1." >&2
+          exit 1
+          ;;
+        *)
+          echo "error: $health_url returned $status — rolling back" >&2
+          cat "$health_body" >&2 || true
+          echo >&2
+          npx wrangler@4 rollback --config "$WRANGLER_TOML" \
+            --message "post-deploy /_health failed (status: $status)" || true
+          exit 1
+          ;;
+      esac
     else
       echo "HEALTH_SKIP=1 — skipping post-deploy /_health gate"
     fi

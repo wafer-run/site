@@ -15,7 +15,7 @@ on:
 # `[patch.crates-io]` rev and rust-toolchain.toml's channel follow
 # IMPRESSPRESS_REF's own, so bump them with it.
 env:
-  WAFER_RUN_REF: 1272fd638ca23b5b790c1b875412310ff1a093ad
+  WAFER_RUN_REF: 6fa4b2058751cdaba2f53fe9b79dba88ec430650
   IMPRESSPRESS_REPO: impresspress/impresspress
   IMPRESSPRESS_REF: 75782e2a2c5333372524cd5c3ee1fce878c961f7
 
@@ -39,6 +39,11 @@ jobs:
           repository: ${{ env.IMPRESSPRESS_REPO }}
           ref: ${{ env.IMPRESSPRESS_REF }}
           path: impresspress
+      # The check deploy-cloudflare.sh runs before it builds, on the layout
+      # it was written for: proves it parses this file's pins.
+      - name: Sibling checkouts at the pins
+        working-directory: site
+        run: bash -c 'source scripts/lib/deploy-checks.sh && check_sibling_pins "$PWD"'
       # A bare install reads site/rust-toolchain.toml: the pinned channel,
       # clippy, rustfmt and the wasm32-unknown-unknown target.
       - name: Install Rust toolchain
