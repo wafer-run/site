@@ -22,7 +22,8 @@ wrangler_overrides_path = "wrangler.overrides.toml"
 # them stops the deploy with the live version untouched. They cover the
 # content block's R2 release assets (`/`, `/docs/`), the registry over the
 # migrated database (`/registry`, `/registry/search`) and the config check
-# (`/_health`: 503 when a required config key is unset).
+# (`/_health`: 503 when a required config key is unset or the config source
+# cannot answer, so a deploy during a D1 outage fails here by design).
 deploy_smoke_paths = ["/health", "/_health", "/", "/docs/", "/registry", "/registry/search"]
 # `d1_queries_per_invocation` is left at the CLI's default (1000): a fresh
 # database's `/_deploy/prepare` (admin, auth and registry migrations plus the

@@ -105,10 +105,11 @@ case "$cmd" in
     # Post-deploy health gate. `/_health` (wafer-site/health block) walks
     # every registered block's `ConfigVar` declarations and 503s if any
     # required key is unset (the registry's keys are all optional, so an
-    # unset registry admin email is not one). Roll back on non-200 so a
-    # misconfigured deploy doesn't sit live: `wrangler rollback` returns to
-    # the previous version, which on a first deploy is the CLI's 503
-    # placeholder.
+    # unset registry admin email is not one) or if the config source (D1)
+    # cannot answer for a block, so a deploy during a D1 outage rolls back
+    # by design. Roll back on non-200 so a misconfigured deploy doesn't sit
+    # live: `wrangler rollback` returns to the previous version, which on a
+    # first deploy is the CLI's 503 placeholder.
     #
     # HEALTH_URL overrides the default wafer.run URL for canary /
     # staging environments. HEALTH_SKIP=1 disables the gate (e.g. when
