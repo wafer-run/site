@@ -44,6 +44,10 @@ jobs:
       - name: Sibling checkouts at the pins
         working-directory: site
         run: bash -c 'source scripts/lib/deploy-checks.sh && check_sibling_pins "$PWD"'
+      # The deploy script and its checks. ubuntu-latest ships shellcheck.
+      - name: shellcheck
+        working-directory: site
+        run: shellcheck -x scripts/deploy-cloudflare.sh scripts/lib/*.sh
       # A bare install reads site/rust-toolchain.toml: the pinned channel,
       # clippy, rustfmt and the wasm32-unknown-unknown target.
       - name: Install Rust toolchain

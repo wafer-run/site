@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Checks `scripts/deploy-cloudflare.sh` runs around a deploy. Sourced, not
 # executed; `tests/deploy_checks.rs` runs each function on fixtures.
 
@@ -15,7 +16,7 @@
 check_sibling_pins() {
   local site_root=$1
   local ci_yml="$site_root/.github/workflows/ci.yml"
-  local failed=0 var dir want have dirty
+  local failed=0 pair var dir want have dirty line
 
   for pair in WAFER_RUN_REF:wafer-run IMPRESSPRESS_REF:impresspress; do
     var=${pair%%:*}
@@ -39,7 +40,9 @@ check_sibling_pins() {
     dirty=$(git -C "$dir" status --porcelain)
     if [[ -n "$dirty" ]]; then
       echo "error: $dir has uncommitted changes; CI builds $var as committed:" >&2
-      echo "$dirty" | sed 's/^/         /' >&2
+      while IFS= read -r line; do
+        echo "         $line" >&2
+      done <<<"$dirty"
       failed=1
     fi
   done

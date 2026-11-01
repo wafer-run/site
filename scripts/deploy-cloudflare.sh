@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 # Deploy wafer-site to Cloudflare Workers + R2 + D1.
 #
 # Prerequisites (one-time):
@@ -54,6 +55,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 SITE_ROOT=$(pwd)
+# shellcheck source=lib/deploy-checks.sh
 . "$SITE_ROOT/scripts/lib/deploy-checks.sh"
 
 cmd=${1:-deploy}
@@ -81,6 +83,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 set -a
+# The deployer's own env file (.env.example lists its keys); nothing to lint.
+# shellcheck source=/dev/null
 . "$ENV_FILE"
 set +a
 echo "using env: $ENV_FILE"
