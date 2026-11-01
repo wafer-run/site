@@ -46,10 +46,11 @@ pub fn routes() -> serde_json::Value {
         { "path": "/registry/**", "block": "impresspress/router" },
         { "path": "/registry",    "block": "impresspress/router" },
 
-        // Deploy-time config validation endpoint. Returns 200 when every
-        // block's required `ConfigVar`s have a value or a default; 503
-        // otherwise with a per-block breakdown. The deploy script gates
-        // rollback on this status code.
+        // Deploy-time config validation endpoint. 200 when every block's
+        // required `ConfigVar`s have a value or a default and the config
+        // source answered for each; otherwise 503 with the blocks by class
+        // (`broken`, `degraded`, `failed`; see `blocks::health`). The deploy
+        // script's post-promotion gate reads the class, not just the code.
         { "path": "/_health", "block": "wafer-site/health" },
 
         // Impresspress-owned routes: auth (`/b/auth/*`), admin, health, etc.
