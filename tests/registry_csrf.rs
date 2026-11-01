@@ -20,23 +20,13 @@
 
 mod common;
 
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use common::make_tarball;
-use impresspress_native::{InfraConfig, ListenerEnv};
 use reqwest::{header, RequestBuilder, Response};
 
 const ADMIN_EMAIL: &str = "registry-admin@example.com";
 const ADMIN_PASSWORD: &str = "correct horse battery staple 42";
-
-/// A port nothing is listening on, for the listener to bind.
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("bind an ephemeral port")
-        .local_addr()
-        .expect("local addr")
-        .port()
-}
 
 /// The site's runtime, serving on a loopback port.
 struct Site {
@@ -49,39 +39,12 @@ struct Site {
 impl Site {
     /// Boot the site; with `admin_email`, set it as the registry admin.
     async fn boot(admin_email: Option<&str>) -> Site {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let storage_root = tmp.path().join("storage");
-        std::fs::create_dir_all(&storage_root).expect("create storage root");
-        let port = free_port();
-        let infra = InfraConfig {
-            listen: format!("127.0.0.1:{port}"),
-            db_type: "sqlite".to_string(),
-            db_path: tmp
-                .path()
-                .join("site.sqlite3")
-                .to_str()
-                .unwrap()
-                .to_string(),
-            db_url: None,
-            storage_type: "local".to_string(),
-            storage_root: storage_root.to_str().unwrap().to_string(),
-            model_cache_dir: tmp.path().join("models").to_str().unwrap().to_string(),
-            listener: ListenerEnv::default(),
-        };
-        let database =
-            impresspress_native::make_database_service(&infra.db_type, &infra.db_path, None)
-                .await
-                .expect("construct sqlite database service");
-        let wafer = impresspress_server::start_native(
-            &infra,
-            database.clone(),
-            &HashMap::new(),
-            Default::default(),
-            wafer_site::flows::site::FLOW_ID,
-            wafer_site::native_app_hooks().expect("the site's hooks"),
-        )
-        .await
-        .expect("the site starts");
+        let common::NativeSite {
+            wafer,
+            database,
+            port,
+            tmp,
+        } = common::start_native_site().await;
 
         // The registry admin email is a variables-table row, written the way
         // the admin Variables page writes it; the registry reads it per

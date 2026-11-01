@@ -359,3 +359,61 @@ pub async fn seed_token(ctx: &dyn Context, user_id: &str, email: &str, raw_token
         .await
         .expect("seed token");
 }
+
+/// The site's runtime as the binary boots it, on a temp database and storage
+/// root; see [`start_native_site`].
+pub struct NativeSite {
+    pub wafer: Arc<wafer_run::Wafer>,
+    /// The database the runtime runs on, for writing variables rows the way
+    /// the admin Variables page writes them.
+    pub database: Arc<dyn wafer_core::interfaces::database::service::DatabaseService>,
+    /// The loopback port the listener serves on.
+    pub port: u16,
+    /// Holds the database file and storage root; drop it after the runtime.
+    pub tmp: tempfile::TempDir,
+}
+
+/// Boot the site exactly as `wafer_site::run` boots it —
+/// `impresspress_server::start_native` with [`wafer_site::native_app_hooks`]
+/// and the site flow as the listener flow — on a temp SQLite database, with
+/// the listener on a free loopback port.
+pub async fn start_native_site() -> NativeSite {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let storage_root = tmp.path().join("storage");
+    std::fs::create_dir_all(&storage_root).expect("create storage root");
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind an ephemeral port")
+        .local_addr()
+        .expect("local addr")
+        .port();
+    let path = |name: &str| tmp.path().join(name).to_str().unwrap().to_string();
+    let infra = impresspress_native::InfraConfig {
+        listen: format!("127.0.0.1:{port}"),
+        db_type: "sqlite".to_string(),
+        db_path: path("site.sqlite3"),
+        db_url: None,
+        storage_type: "local".to_string(),
+        storage_root: storage_root.to_str().unwrap().to_string(),
+        model_cache_dir: path("models"),
+        listener: impresspress_native::ListenerEnv::default(),
+    };
+    let database = impresspress_native::make_database_service(&infra.db_type, &infra.db_path, None)
+        .await
+        .expect("construct sqlite database service");
+    let wafer = impresspress_server::start_native(
+        &infra,
+        database.clone(),
+        &HashMap::new(),
+        Default::default(),
+        wafer_site::flows::site::FLOW_ID,
+        wafer_site::native_app_hooks().expect("the site's hooks"),
+    )
+    .await
+    .expect("the site starts");
+    NativeSite {
+        wafer,
+        database,
+        port,
+        tmp,
+    }
+}
