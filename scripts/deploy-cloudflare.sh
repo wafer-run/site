@@ -143,11 +143,13 @@ case "$cmd" in
     #     while D1 answers, a 500, no answer, or a body that is not the
     #     health block's). `wrangler rollback` returns to the previous
     #     version, which on a first deploy is the CLI's 503 placeholder;
-    #   - outage: D1 began failing after promotion (a `degraded` or `stale`
+    #   - outage: read as D1 failing after promotion (a `degraded` or `stale`
     #     runtime with no deploy-caused entry, or the Worker's plain-text 503
-    #     with `Retry-After`). It says nothing about the new version and the
-    #     previous one would answer the same, so keep it, report and exit
-    #     non-zero.
+    #     with `Retry-After`). That says nothing about the new version and
+    #     the previous one would answer the same, so keep it, report and exit
+    #     non-zero. The plain-text 503 can also be a request that waited on
+    #     another request's failed build of any class (deploy-checks.sh says
+    #     why), so the message says to check the body and the Worker logs.
     # A 503 carrying `Retry-After` is asked once more after that delay (at
     # most 60 s), and only the second answer is judged: one isolate's blip
     # clears within its own window, an outage or a fault answers the same.
@@ -160,20 +162,15 @@ case "$cmd" in
       health_headers=$(mktemp)
       health_body=$(mktemp)
       trap 'rm -f "$health_headers" "$health_body"' EXIT
-      # On a connection failure curl still writes "000" for %{http_code}.
-      health_get() {
-        curl -s -D "$health_headers" -o "$health_body" -w "%{http_code}" \
-          --max-time 30 "$health_url" || true
-      }
       echo
       echo "Waiting for new version to propagate before /_health check…"
       sleep 5
-      status=$(health_get)
+      status=$(health_fetch "$health_url" "$health_headers" "$health_body")
       delay=$(health_gate_retry_delay "$status" "$health_headers")
       if [[ -n "$delay" ]]; then
         echo "$health_url: 503 with Retry-After; asking once more in ${delay}s"
         sleep "$delay"
-        status=$(health_get)
+        status=$(health_fetch "$health_url" "$health_headers" "$health_body")
       fi
       case "$(health_gate_verdict "$status" "$health_headers" "$health_body")" in
         healthy)
@@ -181,7 +178,8 @@ case "$cmd" in
           ;;
         outage)
           echo "error: $health_url returned $status: the backend (D1) is failing, which says" >&2
-          echo "       nothing about the new version. It stays live; check D1. The answer:" >&2
+          echo "       nothing about the new version. It stays live; check D1 and the Worker" >&2
+          echo "       logs (\`./scripts/deploy-cloudflare.sh tail\`). The answer:" >&2
           cat "$health_body" >&2 || true
           echo >&2
           exit 1

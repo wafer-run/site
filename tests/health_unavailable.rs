@@ -424,7 +424,8 @@ async fn a_runtime_degraded_with_no_block_listed_is_an_outage() {
 }
 
 /// Stale: a rebuild failed transiently and the older runtime serves on.
-/// Only an outage does that, so the gate keeps the version.
+/// That is an outage (or, rarely, a block resetting D1 itself so the
+/// rebuild's reads fail too), so the gate keeps the version.
 #[tokio::test]
 async fn a_stale_runtime_is_an_outage() {
     let _platform = PlatformGuard::report(PlatformHealth {

@@ -25,7 +25,9 @@ wrangler_overrides_path = "wrangler.overrides.toml"
 # routes:
 #   - `/health`, impresspress's runtime report: 503 whenever a block of the
 #     isolate that answers does not serve (its `Init` is retrying or failed),
-#     or the runtime is stale or its rebuild failed. Not only during an
+#     the runtime is degraded with no block listed (its stored-config read
+#     failed after it was published, e.g. a request spent its D1 call
+#     budget), or the runtime is stale or its rebuild failed. Not only during an
 #     outage: one D1 error during one isolate's cold boot, in the smoke's
 #     burst of concurrent requests, makes that isolate answer 503 until its
 #     retry window ends (at least 1 s);

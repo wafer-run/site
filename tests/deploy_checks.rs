@@ -398,3 +398,31 @@ fn only_a_503_with_retry_after_is_asked_again() {
     assert_eq!(retry_delay("500", Some("7")), "");
     assert_eq!(retry_delay("200", Some("7")), "");
 }
+
+/// A fetch that cannot connect (the gate's retry, say) prints curl's `000`
+/// and leaves no earlier answer in the files, so neither the verdict nor the
+/// rollback message reads the first 503's headers or body as its own.
+#[test]
+fn a_fetch_that_cannot_connect_leaves_no_earlier_answer() {
+    let headers = tempfile::NamedTempFile::new().expect("headers file");
+    let body = tempfile::NamedTempFile::new().expect("body file");
+    std::fs::write(headers.path(), "HTTP/2 503\r\nretry-after: 7\r\n").expect("write");
+    std::fs::write(body.path(), r#"{"first":"answer"}"#).expect("write");
+    // Nothing listens on port 1; curl fails at once.
+    let out = Command::new("bash")
+        .args([
+            "-c",
+            r#"source "$1" && health_fetch "$2" "$3" "$4""#,
+            "bash",
+            LIB,
+            "http://127.0.0.1:1/_health",
+        ])
+        .arg(headers.path())
+        .arg(body.path())
+        .output()
+        .expect("run bash");
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "000");
+    assert_eq!(std::fs::read_to_string(headers.path()).unwrap(), "");
+    assert_eq!(std::fs::read_to_string(body.path()).unwrap(), "");
+}

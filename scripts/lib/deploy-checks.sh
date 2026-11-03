@@ -49,6 +49,21 @@ check_sibling_pins() {
   return "$failed"
 }
 
+# Request URL once, writing the response headers to HEADERS_FILE and the
+# body to BODY_FILE, and print the HTTP status.
+#
+# Usage: health_fetch URL HEADERS_FILE BODY_FILE
+# Both files are emptied first: on a connection failure curl writes neither
+# (and prints "000"), so an earlier answer must not be left behind to be
+# judged or printed as this one.
+health_fetch() {
+  local url=$1 headers_file=$2 body_file=$3
+  : >"$headers_file"
+  : >"$body_file"
+  curl -s -D "$headers_file" -o "$body_file" -w "%{http_code}" \
+    --max-time 30 "$url" || true
+}
+
 # The `Retry-After` of a response, as whole seconds.
 #
 # Usage: retry_after_secs HEADERS_FILE
@@ -96,11 +111,21 @@ health_gate_retry_delay() {
 #              version: the previous version would answer the same, so it is
 #              kept, and the script reports and exits non-zero. Any of:
 #              - a 503 with `Retry-After` whose body is not JSON: the Worker's
-#                own plain-text 503, sent when no runtime could be built
-#                inside a transient retry window;
+#                own plain-text 503. impresspress sends it when no runtime
+#                could be built inside a transient retry window, but also to
+#                a request that waited on another request's failed build
+#                whatever that build's class (a permanent fault included),
+#                and when the build slot stayed busy. This gate cannot tell
+#                those apart, so it reads them all as an outage; the one
+#                retry usually turns a fault into its 500 (the retry becomes
+#                the rebuild owner, or lands in the fault's window). The root
+#                fix, a waiter answering the owner's class, is impresspress's;
 #              - the health body with empty `broken` and `failed`, and
-#                `runtime.status` `stale` (only an outage makes a runtime
-#                stale);
+#                `runtime.status` `stale`. Only a transiently failed rebuild
+#                makes a runtime stale: an outage, or rarely a block of the
+#                new version whose own `Init` resets D1 so that the
+#                rebuild's reads fail too (IP-C logs a block retrying across
+#                8 runtimes at `error`);
 #              - the same with `runtime.status` `degraded`, unless blocks are
 #                listed as not serving while every block's config answered
 #                (see below). A `degraded` runtime that lists no block (its
