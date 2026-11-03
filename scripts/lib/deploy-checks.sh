@@ -49,30 +49,108 @@ check_sibling_pins() {
   return "$failed"
 }
 
-# Decide what the post-promotion `/_health` answer means.
+# The `Retry-After` of a response, as whole seconds.
 #
-# Usage: health_gate_verdict STATUS BODY_FILE
-# Prints one of:
-#   healthy  — 200;
-#   outage   — 503 whose body has `degraded` entries and no `broken` or
-#              `failed` ones: the config source (D1) failed transiently
-#              after promotion. That says nothing about the new version, and
-#              the previous one would answer the same, so it is not rolled
-#              back;
-#   rollback — anything else: `broken` (a required key unset) or `failed`
-#              (a source fault) entries, another status, or a body that is
-#              not the health block's.
+# Usage: retry_after_secs HEADERS_FILE
+# HEADERS_FILE is what `curl -D` wrote. Prints the header's value when it is
+# delta-seconds (the only form the Worker sends), and nothing when the header
+# is absent or in any other form.
+retry_after_secs() {
+  local headers_file=$1
+  [[ -f "$headers_file" ]] || return 0
+  tr -d '\r' <"$headers_file" \
+    | sed -n 's/^[Rr][Ee][Tt][Rr][Yy]-[Aa][Ff][Tt][Ee][Rr]:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*$/\1/p' \
+    | tail -n 1
+}
+
+# How long to wait before asking `/_health` once more, if at all.
+#
+# Usage: health_gate_retry_delay STATUS HEADERS_FILE
+# Prints the seconds to wait when the answer is a 503 with `Retry-After`
+# (at least 1, at most 60), and nothing otherwise. The gate asks once more
+# after that wait, and judges the second answer alone: a 503 that clears
+# within its own `Retry-After` was one isolate's blip (a D1 error during its
+# cold boot, a request that spent its D1 call budget), not a verdict on the
+# version; an outage, or a fault of the version, answers the same again.
+health_gate_retry_delay() {
+  local status=$1 headers_file=$2 seconds
+  [[ "$status" == "503" ]] || return 0
+  seconds=$(retry_after_secs "$headers_file")
+  [[ -n "$seconds" ]] || return 0
+  seconds=$((10#$seconds))
+  if ((seconds < 1)); then
+    seconds=1
+  elif ((seconds > 60)); then
+    seconds=60
+  fi
+  echo "$seconds"
+}
+
+# Decide what a post-promotion `/_health` answer means.
+#
+# Usage: health_gate_verdict STATUS HEADERS_FILE BODY_FILE
+# (the HTTP status, the headers `curl -D` wrote, and the body). Prints one of:
+#
+#   healthy  — 200.
+#   outage   — the backend (D1) is failing, which says nothing about the new
+#              version: the previous version would answer the same, so it is
+#              kept, and the script reports and exits non-zero. Any of:
+#              - a 503 with `Retry-After` whose body is not JSON: the Worker's
+#                own plain-text 503, sent when no runtime could be built
+#                inside a transient retry window;
+#              - the health body with empty `broken` and `failed`, and
+#                `runtime.status` `stale` (only an outage makes a runtime
+#                stale);
+#              - the same with `runtime.status` `degraded`, unless blocks are
+#                listed as not serving while every block's config answered
+#                (see below). A `degraded` runtime that lists no block (its
+#                variables read failed after it was published) is an outage
+#                whatever the config lists hold;
+#              - the same with `runtime.status` `ok` and `degraded` config
+#                entries (the config source failed transiently).
+#   rollback — the new version is at fault, or the answer is not one the
+#              health block gives during an outage:
+#              - `broken` entries (a required key unset) or `failed` entries
+#                (the config source faulted);
+#              - `runtime.status` `failed` (a block's `Init`, or a rebuild,
+#                failed for good);
+#              - `runtime.status` `degraded` with blocks not serving while
+#                every block's config answered (`degraded` empty): a block
+#                whose own `Init` keeps failing transiently — resetting D1
+#                itself, say — with the database otherwise answering;
+#              - a 503 naming nothing, any other status (a 500, curl's 000),
+#                JSON that is not the health body, or a non-JSON 503 without
+#                `Retry-After`.
 health_gate_verdict() {
-  local status=$1 body_file=$2
+  local status=$1 headers_file=$2 body_file=$3
   if [[ "$status" == "200" ]]; then
     echo healthy
-  elif [[ "$status" == "503" ]] && jq -e '
-      (.broken | type == "array" and length == 0)
-      and (.failed | type == "array" and length == 0)
-      and (.degraded | type == "array" and length > 0)
-    ' "$body_file" >/dev/null 2>&1; then
-    echo outage
-  else
-    echo rollback
+    return 0
   fi
+  if [[ "$status" != "503" ]]; then
+    echo rollback
+    return 0
+  fi
+  if ! jq -e . "$body_file" >/dev/null 2>&1; then
+    if [[ -n "$(retry_after_secs "$headers_file")" ]]; then
+      echo outage
+    else
+      echo rollback
+    fi
+    return 0
+  fi
+  jq -r '
+    def list(f): f | type == "array";
+    if (list(.ok) and list(.broken) and list(.degraded) and list(.failed)
+        and (.runtime | type == "object")
+        and (.runtime.status | type == "string")) | not then "rollback"
+    elif (.broken | length) > 0 or (.failed | length) > 0 then "rollback"
+    elif .runtime.status == "failed" then "rollback"
+    elif .runtime.status == "stale" then "outage"
+    elif .runtime.status == "degraded" then
+      if ((.runtime.unavailable // []) | length) > 0 and (.degraded | length) == 0
+      then "rollback" else "outage" end
+    elif .runtime.status == "ok" and (.degraded | length) > 0 then "outage"
+    else "rollback" end
+  ' "$body_file"
 }

@@ -1084,6 +1084,7 @@ dependencies = [
  "wafer-block-sqlite",
  "wafer-core",
  "wafer-run",
+ "wafer-sql-utils",
 ]
 
 [[package]]
@@ -3163,6 +3164,7 @@ dependencies = [
  "wafer-core",
  "wafer-flow",
  "wafer-run",
+ "wafer-sql-utils",
  "wasm-bindgen",
  "worker",
 ]

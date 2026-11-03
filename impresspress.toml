@@ -21,15 +21,28 @@ wrangler_overrides_path = "wrangler.overrides.toml"
 # version (through its preview URL) before promoting it: a non-200 on any of
 # them stops the deploy with the live version untouched. They cover the
 # content block's R2 release assets (`/`, `/docs/`), the registry over the
-# migrated database (`/registry`, `/registry/search`) and the config check
-# (`/_health`: 503 when a required config key is unset or the config source
-# cannot answer). A deploy during a D1 outage therefore stops before
-# promotion, by design: at `/_deploy/prepare` when D1 is down, or here when
-# it fails intermittently.
+# migrated database (`/registry`, `/registry/search`) and the two health
+# routes:
+#   - `/health`, impresspress's runtime report: 503 whenever a block of the
+#     isolate that answers does not serve (its `Init` is retrying or failed),
+#     or the runtime is stale or its rebuild failed. Not only during an
+#     outage: one D1 error during one isolate's cold boot, in the smoke's
+#     burst of concurrent requests, makes that isolate answer 503 until its
+#     retry window ends (at least 1 s);
+#   - `/_health`, the same runtime report plus the config check (503 when a
+#     required config key is unset or the config source cannot answer).
+# A deploy during a D1 outage therefore stops before promotion, by design: at
+# `/_deploy/prepare` when D1 is down, or here when it fails intermittently.
+# The CLI does not retry a smoke request, so a one-isolate blip stops a
+# deploy too. Nothing is promoted and migrations already applied stay
+# recorded: run the deploy again. (After promotion, the deploy script's own
+# `/_health` gate asks once more after a 503's `Retry-After`.)
 deploy_smoke_paths = ["/health", "/_health", "/", "/docs/", "/registry", "/registry/search"]
-# `d1_queries_per_invocation` is left at the CLI's default (1000): a fresh
+# `d1_calls_per_invocation` is left at the CLI's default (1000): a fresh
 # database's `/_deploy/prepare` (admin, auth and registry migrations plus the
-# seeds) runs in one invocation well under it.
+# seeds; impresspress measures 220 calls with every block it ships) runs in one
+# invocation well under it. `[cloudflare]` refuses a key it does not declare,
+# so the pre-rename `d1_queries_per_invocation` would fail the build.
 # No `crons`: the site exports no `scheduled` handler, so the auth retention
 # sweep is off.
 

@@ -389,7 +389,7 @@ pub async fn start_native_site() -> NativeSite {
     let path = |name: &str| tmp.path().join(name).to_str().unwrap().to_string();
     let infra = impresspress_native::InfraConfig {
         listen: format!("127.0.0.1:{port}"),
-        db_type: "sqlite".to_string(),
+        db_type: wafer_sql_utils::Backend::Sqlite,
         db_path: path("site.sqlite3"),
         db_url: None,
         storage_type: "local".to_string(),
@@ -397,7 +397,7 @@ pub async fn start_native_site() -> NativeSite {
         model_cache_dir: path("models"),
         listener: impresspress_native::ListenerEnv::default(),
     };
-    let database = impresspress_native::make_database_service(&infra.db_type, &infra.db_path, None)
+    let database = impresspress_native::make_database_service(infra.db_type, &infra.db_path, None)
         .await
         .expect("construct sqlite database service");
     let wafer = impresspress_server::start_native(

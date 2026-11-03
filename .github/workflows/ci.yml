@@ -15,9 +15,9 @@ on:
 # `[patch.crates-io]` rev and rust-toolchain.toml's channel follow
 # IMPRESSPRESS_REF's own, so bump them with it.
 env:
-  WAFER_RUN_REF: 6fa4b2058751cdaba2f53fe9b79dba88ec430650
+  WAFER_RUN_REF: 54683c500f72358b90895ff76f372061cb767055
   IMPRESSPRESS_REPO: impresspress/impresspress
-  IMPRESSPRESS_REF: 75782e2a2c5333372524cd5c3ee1fce878c961f7
+  IMPRESSPRESS_REF: b9aaca976842e5ec9d36a8a7c8d4839f4882fbf2
 
 jobs:
   rust:

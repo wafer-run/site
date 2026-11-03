@@ -137,9 +137,10 @@ pub fn register_post_build_for_site(
     crate::blocks::registry::register(wafer)
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
-    // 4c. Health block. Backs `/_health` with a deploy-time config
-    //     validation summary; the deploy script rolls back on any non-200
-    //     except a 503 whose only entries are `degraded`.
+    // 4c. Health block. Backs `/_health`: every block's config checked
+    //     through the config source, and the runtime report `/health`
+    //     gives. The deploy script's post-promotion gate reads it to tell a
+    //     fault of the new version (roll back) from an outage (keep it).
     crate::blocks::health::register(wafer)
         .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
 
