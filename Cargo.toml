@@ -96,6 +96,9 @@ impresspress-core          = { path = "../impresspress/crates/impresspress-core"
 # The published WaferFlow JSON Schema is generated from wafer-flow's types;
 # tests/flow_schema.rs fails when public/schema/waferflow/ drifts from them.
 wafer-flow                 = { path = "../wafer-run/crates/wafer-flow", features = ["json-schema"] }
+# The SQL dialect (`Backend`) tests/common hands impresspress-native's
+# `InfraConfig` and `make_database_service`.
+wafer-sql-utils            = { path = "../wafer-run/crates/wafer-sql-utils" }
 # Validates the docs' flow examples against the published schema file.
 jsonschema                 = { version = "0.58", default-features = false }
 axum = "0.8"

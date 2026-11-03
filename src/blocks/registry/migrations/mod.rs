@@ -8,8 +8,9 @@
 //! applied and recorded or not applied at all. `block_settings.current_hash`
 //! then holds the list's
 //! [`impresspress_core::migration_helper::migration_set_hash`]. The dialect
-//! is picked by `WAFER_RUN_SHARED__DATABASE__BACKEND` (`sqlite` |
-//! `postgres`, default `sqlite`).
+//! is the runtime's `IMPRESSPRESS_DB_TYPE` (`sqlite` | `postgres`), published
+//! from the database the runtime was built with: `sqlite` for D1, what
+//! `IMPRESSPRESS_DB_TYPE` names natively (default `sqlite`).
 //!
 //! A shipped file is frozen: its basename is its ledger key and its
 //! statements are its content hash, which `tests/registry_migrations.rs` pins

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck source-path=SCRIPTDIR
 # Deploy wafer-site to Cloudflare Workers + R2 + D1.
 #
 # Prerequisites (one-time):
@@ -54,6 +55,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 SITE_ROOT=$(pwd)
+# shellcheck source=lib/deploy-checks.sh
 . "$SITE_ROOT/scripts/lib/deploy-checks.sh"
 
 cmd=${1:-deploy}
@@ -81,6 +83,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 set -a
+# The deployer's own env file (.env.example lists its keys); nothing to lint.
+# shellcheck source=/dev/null
 . "$ENV_FILE"
 set +a
 echo "using env: $ENV_FILE"
@@ -123,44 +127,61 @@ case "$cmd" in
   deploy)
     "$IMPRESSPRESS_BIN" deploy --target cloudflare
 
-    # Post-deploy health gate. `/_health` (wafer-site/health block) walks
-    # every registered block's `ConfigVar` declarations through the config
-    # source (D1) and answers 503 when a required key is unset (`broken`;
-    # the registry's keys are all optional, so an unset registry admin email
-    # is not one), the source faults (`failed`) or the source fails
-    # transiently (`degraded`).
+    # Post-deploy health gate: `/_health` (the wafer-site/health block)
+    # reports whether every block's config resolves through the config
+    # source (D1) — `broken`, `degraded` and `failed` lists — and, under
+    # `runtime`, impresspress's report of the runtime serving the request
+    # (the `/health` body: `ok`, `degraded`, `stale` or `failed`).
     #
     # A D1 outage already underway never reaches this gate: `impresspress
     # deploy` stops at `/_deploy/prepare` or at the candidate smoke
     # (impresspress.toml `deploy_smoke_paths`), before promotion, with the
-    # live version untouched. Here, after promotion:
-    #   - `broken` or `failed` entries, another status, or a body that is not
-    #     the health block's: the new version is at fault, so roll back
-    #     (`wrangler rollback` returns to the previous version, which on a
-    #     first deploy is the CLI's 503 placeholder);
-    #   - a 503 with only `degraded` entries: an outage that began after
-    #     promotion. It says nothing about the new version and the previous
-    #     one would answer the same, so keep it, report and exit non-zero.
+    # live version untouched. Here, after promotion, `health_gate_verdict`
+    # (scripts/lib/deploy-checks.sh, where each rule is listed) decides:
+    #   - rollback: the new version is at fault (`broken` or `failed`
+    #     entries, a `failed` runtime, a block that keeps failing its `Init`
+    #     while D1 answers, a 500, no answer, or a body that is not the
+    #     health block's). `wrangler rollback` returns to the previous
+    #     version, which on a first deploy is the CLI's 503 placeholder;
+    #   - outage: read as D1 failing after promotion (a `degraded` or `stale`
+    #     runtime with no deploy-caused entry, or the Worker's plain-text 503
+    #     with `Retry-After`). That says nothing about the new version and
+    #     the previous one would answer the same, so keep it, report and exit
+    #     non-zero. The plain-text 503 can also be a request that waited on
+    #     another request's failed build of any class (deploy-checks.sh says
+    #     why), so the message says to check the body and the Worker logs.
+    # A 503 carrying `Retry-After` is asked once more after that delay (at
+    # most 60 s), and only the second answer is judged: one isolate's blip
+    # clears within its own window, an outage or a fault answers the same.
     #
     # HEALTH_URL overrides the default wafer.run URL for canary /
     # staging environments. HEALTH_SKIP=1 disables the gate (e.g. when
     # deploying a brand-new worker whose DNS hasn't propagated yet).
     if [[ "${HEALTH_SKIP:-0}" != "1" ]]; then
       health_url=${HEALTH_URL:-https://wafer.run/_health}
+      health_headers=$(mktemp)
       health_body=$(mktemp)
-      trap 'rm -f "$health_body"' EXIT
+      trap 'rm -f "$health_headers" "$health_body"' EXIT
       echo
       echo "Waiting for new version to propagate before /_health check…"
       sleep 5
-      # On a connection failure curl still writes "000" for %{http_code}.
-      status=$(curl -s -o "$health_body" -w "%{http_code}" --max-time 30 "$health_url") || true
-      case "$(health_gate_verdict "$status" "$health_body")" in
+      status=$(health_fetch "$health_url" "$health_headers" "$health_body")
+      delay=$(health_gate_retry_delay "$status" "$health_headers")
+      if [[ -n "$delay" ]]; then
+        echo "$health_url: 503 with Retry-After; asking once more in ${delay}s"
+        sleep "$delay"
+        status=$(health_fetch "$health_url" "$health_headers" "$health_body")
+      fi
+      case "$(health_gate_verdict "$status" "$health_headers" "$health_body")" in
         healthy)
           echo "$health_url: 200 — deploy complete"
           ;;
         outage)
-          echo "error: $health_url returned $status: the config source (D1) is failing transiently" >&2
-          echo "       for $(jq -c .degraded "$health_body"). The new version stays live; check D1." >&2
+          echo "error: $health_url returned $status: the backend (D1) is failing, which says" >&2
+          echo "       nothing about the new version. It stays live; check D1 and the Worker" >&2
+          echo "       logs (\`./scripts/deploy-cloudflare.sh tail\`). The answer:" >&2
+          cat "$health_body" >&2 || true
+          echo >&2
           exit 1
           ;;
         *)
