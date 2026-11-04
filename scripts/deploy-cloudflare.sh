@@ -139,11 +139,11 @@ case "$cmd" in
     # live version untouched. Here, after promotion, `health_gate_verdict`
     # (scripts/lib/deploy-checks.sh, the one list of its rules and why)
     # decides `healthy`, `outage` (keep the new version, report and exit
-    # non-zero) or `rollback`. A rollback returns to the version at 100% in
-    # the deployment before this one — on a first deploy the CLI's 503
-    # placeholder — resolved first (`rollback_target_version`) so a version
-    # listed in REFUSED_ROLLBACK_VERSIONS is refused before anything changes
-    # (`check_rollback_target`); the operator then deploys forward.
+    # non-zero) or `rollback`. `rollback_to_previous` (deploy-checks.sh)
+    # returns to the version at 100% in the deployment before this one — on
+    # a first deploy the CLI's 503 placeholder — unless it predates the
+    # rollback baseline, and checks the result; either way the deploy exits
+    # non-zero.
     # A 503 carrying `Retry-After` is asked once more after that delay (at
     # most 60 s), and only the second answer is judged: one isolate's blip
     # clears within its own window, an outage or a fault answers the same.
@@ -182,22 +182,10 @@ case "$cmd" in
           echo "error: $health_url returned $status — rolling back" >&2
           cat "$health_body" >&2 || true
           echo >&2
-          deployments=$(mktemp)
-          trap 'rm -f "$health_headers" "$health_body" "$deployments"' EXIT
-          if ! npx wrangler@4 deployments list --config "$WRANGLER_TOML" --json >"$deployments"; then
-            echo "error: could not list the Worker's deployments; the new version stays live." >&2
-            echo "       Roll back by hand to a vetted version id, or deploy forward." >&2
-            exit 1
-          fi
-          target=$(rollback_target_version "$deployments") || {
-            echo "       The new version stays live; deploy forward." >&2
-            exit 1
-          }
-          check_rollback_target "$target" || exit 1
-          if ! npx wrangler@4 rollback "$target" --config "$WRANGLER_TOML" \
-            --message "post-deploy /_health failed (status: $status)"; then
-            echo "error: the rollback to $target failed; the new version may still be live." >&2
-          fi
+          # A refused or failed rollback has printed what to do; a verified
+          # one still leaves a deploy that failed.
+          rollback_to_previous "$WRANGLER_TOML" \
+            "post-deploy /_health failed (status: $status)" || exit 1
           exit 1
           ;;
       esac

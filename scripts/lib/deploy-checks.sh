@@ -195,49 +195,147 @@ health_gate_verdict() {
   ' "$body_file"
 }
 
-# Worker versions `deploy-cloudflare.sh` never rolls back to, one per line:
-# the version id, then why. 9fbf49a3 is the same code as its successor but
-# carries secrets since deleted from the Worker (the bootstrap-admin token
-# among them), which a rollback to it would bring back.
-REFUSED_ROLLBACK_VERSIONS='9fbf49a3-d969-4b23-981b-eb55810cbd46 carries secrets since deleted from the Worker'
+# The oldest Worker version a rollback may return to: the first version
+# made after wafer.run's 2026-10-30 reset. A version created before it
+# predates the reset, so `rollback_to_previous` refuses it whatever it is.
+ROLLBACK_BASELINE_VERSION=4c6ff923-be37-453a-a240-7c784072b76a
 
 # The version a rollback returns to: the one at 100% in the most recent
-# deployment before the current one — what `wrangler rollback` picks with no
-# version id (its `fetchDefaultRollbackVersionId`), resolved here so the
-# script can refuse it before anything changes.
+# deployment before the current one — the rule `wrangler rollback` applies
+# with no version id (its `fetchDefaultRollbackVersionId`).
 #
-# Usage: rollback_target_version DEPLOYMENTS_JSON
-# DEPLOYMENTS_JSON is what `wrangler deployments list --json` wrote. Prints
-# the version id, or prints an error to stderr and returns 1 when no earlier
-# deployment has a version at 100%.
+# Usage: rollback_target_version <DEPLOYMENTS_JSON
+# Reads what `wrangler deployments list --json` prints. Prints the version
+# id, or prints why not to stderr and returns 1: the input is not a JSON
+# array (a parse failure, named as one), or no earlier deployment has a
+# version at 100%.
 rollback_target_version() {
-  local deployments_json=$1 version
+  local deployments version
+  deployments=$(cat)
+  if ! jq -e 'type == "array"' >/dev/null <<<"$deployments"; then
+    echo "error: could not parse wrangler's deployments list as a JSON array" >&2
+    return 1
+  fi
   version=$(jq -r '
     sort_by(.created_on) | reverse | .[1:]
     | map(.versions // [] | map(select(.percentage == 100)) | .[0].version_id // empty)
     | .[0] // empty
-  ' "$deployments_json" 2>/dev/null) || version=
+  ' <<<"$deployments")
   if [[ -z "$version" ]]; then
-    echo "error: no earlier deployment with a version at 100% in $deployments_json" >&2
+    echo "error: no earlier deployment has a version at 100% to roll back to" >&2
     return 1
   fi
   echo "$version"
 }
 
-# Refuse a rollback target listed in REFUSED_ROLLBACK_VERSIONS.
+# The version serving all traffic: the one at 100% in the most recent
+# deployment.
 #
-# Usage: check_rollback_target VERSION_ID
-# Returns 0 when the version may be rolled back to; otherwise prints why to
+# Usage: live_version <DEPLOYMENTS_JSON
+# Prints the version id, or prints why not to stderr and returns 1.
+live_version() {
+  local deployments version
+  deployments=$(cat)
+  if ! jq -e 'type == "array"' >/dev/null <<<"$deployments"; then
+    echo "error: could not parse wrangler's deployments list as a JSON array" >&2
+    return 1
+  fi
+  version=$(jq -r '
+    sort_by(.created_on) | last // {}
+    | .versions // [] | map(select(.percentage == 100)) | .[0].version_id // empty
+  ' <<<"$deployments")
+  if [[ -z "$version" ]]; then
+    echo "error: the latest deployment has no version at 100%" >&2
+    return 1
+  fi
+  echo "$version"
+}
+
+# When a Worker version was created, as Unix seconds.
+#
+# Usage: version_created_secs <VERSION_JSON
+# Reads what `wrangler versions view ID --json` prints (`metadata.created_on`,
+# RFC 3339 with fractional seconds). Prints the seconds, or prints why not to
 # stderr and returns 1.
-check_rollback_target() {
-  local version=$1 id reason
-  while read -r id reason; do
-    [[ -n "$id" ]] || continue
-    if [[ "$version" == "$id" ]]; then
-      echo "error: refusing to roll back to $version: $reason." >&2
-      echo "       Deploy forward instead: fix the commit and run this script again." >&2
-      return 1
-    fi
-  done <<<"$REFUSED_ROLLBACK_VERSIONS"
-  return 0
+version_created_secs() {
+  local version secs
+  version=$(cat)
+  if ! jq -e 'type == "object"' >/dev/null <<<"$version"; then
+    echo "error: could not parse wrangler's version as a JSON object" >&2
+    return 1
+  fi
+  if ! secs=$(jq -er '
+    .metadata.created_on | sub("\\.[0-9]+"; "") | fromdateiso8601
+  ' <<<"$version"); then
+    echo "error: the version has no RFC 3339 metadata.created_on" >&2
+    return 1
+  fi
+  echo "$secs"
+}
+
+# Roll the Worker back after the gate's `rollback` verdict, or refuse to.
+#
+# Usage: rollback_to_previous WRANGLER_TOML MESSAGE
+# 1. Resolves the target from `wrangler deployments list --json`
+#    (`rollback_target_version`).
+# 2. Refuses a target created before ROLLBACK_BASELINE_VERSION, reading both
+#    versions' `created_on` from `wrangler versions view --json`; a target or
+#    baseline it cannot read is refused too.
+# 3. Deploys the target at 100% with `wrangler versions deploy`, not
+#    `wrangler rollback`: when the target's secrets differ from the Worker's
+#    (API error 10220), `rollback` confirms on its own outside a terminal and
+#    redeploys with `force=true`, restoring them; `versions deploy` never
+#    forces, so that error fails the deploy instead.
+# 4. Reads the deployments again and checks the target is live: wrangler
+#    exits 0 when an operator declines its prompt.
+# Prints progress to stdout and every failure to stderr, with what to do.
+# Returns 0 only when the target is verified live.
+rollback_to_previous() {
+  local config=$1 message=$2 deployments new target target_secs baseline_secs live
+  local forward="Deploy forward from main: merge a fix and run ./scripts/deploy-cloudflare.sh from a clean main checkout."
+  if ! deployments=$(npx wrangler@4 deployments list --config "$config" --json); then
+    echo "error: could not list the Worker's deployments, so nothing was rolled back." >&2
+    echo "       $forward" >&2
+    return 1
+  fi
+  new=$(live_version <<<"$deployments") || new="(unknown)"
+  if ! target=$(rollback_target_version <<<"$deployments"); then
+    echo "error: nothing to roll back to; $new is still live." >&2
+    echo "       $forward" >&2
+    return 1
+  fi
+  if ! baseline_secs=$(npx wrangler@4 versions view "$ROLLBACK_BASELINE_VERSION" \
+    --config "$config" --json | version_created_secs) ||
+    ! target_secs=$(npx wrangler@4 versions view "$target" \
+      --config "$config" --json | version_created_secs); then
+    echo "error: could not read when $target or the baseline $ROLLBACK_BASELINE_VERSION" >&2
+    echo "       was created, so $target is refused; $new is still live." >&2
+    echo "       $forward" >&2
+    return 1
+  fi
+  if ((target_secs < baseline_secs)); then
+    echo "error: refusing to roll back to $target: it predates the 2026-10-30 reset" >&2
+    echo "       (older than $ROLLBACK_BASELINE_VERSION). $new is still live." >&2
+    echo "       $forward" >&2
+    return 1
+  fi
+  echo "Rolling back to $target"
+  if ! npx wrangler@4 versions deploy "$target@100%" --config "$config" \
+    --message "$message" --yes; then
+    echo "error: the rollback to $target failed; $new is still live." >&2
+    echo "       $forward" >&2
+    return 1
+  fi
+  if ! deployments=$(npx wrangler@4 deployments list --config "$config" --json) ||
+    ! live=$(live_version <<<"$deployments"); then
+    echo "error: could not confirm the rollback to $target; check" >&2
+    echo "       \`npx wrangler@4 deployments status --config $config\`." >&2
+    return 1
+  fi
+  if [[ "$live" != "$target" ]]; then
+    echo "error: rollback did not happen; $live is still live." >&2
+    echo "       $forward" >&2
+    return 1
+  fi
+  echo "Rolled back: $target is live"
 }

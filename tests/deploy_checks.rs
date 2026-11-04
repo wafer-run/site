@@ -10,9 +10,10 @@
 //!   the health block never sends; `health_gate_retry_delay` asks once more
 //!   after a 503's `Retry-After`. The health block's own answers are checked
 //!   against the gate in tests/health_unavailable.rs.
-//! - `rollback_target_version` resolves the version a rollback returns to
-//!   from `wrangler deployments list --json`, and `check_rollback_target`
-//!   refuses the versions in `REFUSED_ROLLBACK_VERSIONS`.
+//! - `rollback_to_previous` resolves the version a rollback returns to,
+//!   refuses one older than the rollback baseline, deploys it, and checks it
+//!   went live — run against a stub `npx` that logs every call and answers
+//!   wrangler's JSON from fixtures.
 
 use std::{
     path::{Path, PathBuf},
@@ -105,17 +106,41 @@ impl Workspace {
     }
 
     fn check(&self) -> Output {
-        Command::new("bash")
-            .args([
-                "-c",
-                r#"source "$1" && check_sibling_pins "$2""#,
-                "bash",
-                LIB,
-            ])
-            .arg(&self.site)
-            .output()
-            .expect("run bash")
+        run_lib(r#"check_sibling_pins "$1""#, &[self.site.as_os_str()], None)
     }
+}
+
+/// Run `script` in bash with the lib sourced: `$0` is the lib, `$1`.. are
+/// `args`, and stdin is `stdin` (empty when `None`).
+fn run_lib<A: AsRef<std::ffi::OsStr>>(script: &str, args: &[A], stdin: Option<&str>) -> Output {
+    run_lib_in(Command::new("bash"), script, args, stdin)
+}
+
+/// [`run_lib`] with a prepared `Command` (an environment, a `PATH`).
+fn run_lib_in<A: AsRef<std::ffi::OsStr>>(
+    mut cmd: Command,
+    script: &str,
+    args: &[A],
+    stdin: Option<&str>,
+) -> Output {
+    use std::io::Write as _;
+    let mut child = cmd
+        .args(["-c", &format!(r#"source "$0" && {script}"#), LIB])
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("run bash");
+    let mut pipe = child.stdin.take().expect("stdin");
+    pipe.write_all(stdin.unwrap_or_default().as_bytes())
+        .expect("write stdin");
+    drop(pipe);
+    child.wait_with_output().expect("wait for bash")
+}
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 fn stderr(out: &Output) -> String {
@@ -216,24 +241,17 @@ fn run_gate(func: &str, status: &str, retry_after: Option<&str>, body: Option<&s
     std::fs::write(headers.path(), raw).expect("write");
     let body_file = tempfile::NamedTempFile::new().expect("body file");
     std::fs::write(body_file.path(), body.unwrap_or_default()).expect("write");
-    let out = Command::new("bash")
-        .args([
-            "-c",
-            r#"source "$1" && "$2" "$3" "$4" "$5""#,
-            "bash",
-            LIB,
-            func,
-            status,
-        ])
-        .arg(headers.path())
-        .arg(body_file.path())
-        .output()
-        .expect("run bash");
+    let out = run_lib(
+        &format!(r#"{func} "$1" "$2" "$3""#),
+        &[
+            std::ffi::OsStr::new(status),
+            headers.path().as_os_str(),
+            body_file.path().as_os_str(),
+        ],
+        None,
+    );
     assert!(out.status.success(), "{out:?}");
-    String::from_utf8(out.stdout)
-        .expect("UTF-8")
-        .trim()
-        .to_string()
+    stdout(&out)
 }
 
 fn verdict(status: &str, retry_after: Option<&str>, body: &str) -> String {
@@ -412,42 +430,23 @@ fn a_fetch_that_cannot_connect_leaves_no_earlier_answer() {
     std::fs::write(headers.path(), "HTTP/2 503\r\nretry-after: 7\r\n").expect("write");
     std::fs::write(body.path(), r#"{"first":"answer"}"#).expect("write");
     // Nothing listens on port 1; curl fails at once.
-    let out = Command::new("bash")
-        .args([
-            "-c",
-            r#"source "$1" && health_fetch "$2" "$3" "$4""#,
-            "bash",
-            LIB,
-            "http://127.0.0.1:1/_health",
-        ])
-        .arg(headers.path())
-        .arg(body.path())
-        .output()
-        .expect("run bash");
+    let out = run_lib(
+        r#"health_fetch "$1" "$2" "$3""#,
+        &[
+            std::ffi::OsStr::new("http://127.0.0.1:1/_health"),
+            headers.path().as_os_str(),
+            body.path().as_os_str(),
+        ],
+        None,
+    );
     assert!(out.status.success(), "{out:?}");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "000");
     assert_eq!(std::fs::read_to_string(headers.path()).unwrap(), "");
     assert_eq!(std::fs::read_to_string(body.path()).unwrap(), "");
 }
 
-/// Run `script` (bash, with the lib sourced and `$1`.. set to `args`).
-fn run_lib(script: &str, args: &[&str]) -> Output {
-    Command::new("bash")
-        .args(["-c", &format!(r#"source "$0" && {script}"#), LIB])
-        .args(args)
-        .output()
-        .expect("run bash")
-}
-
-/// `rollback_target_version` on `deployments` (the JSON wrangler prints).
-fn rollback_target(deployments: &str) -> Output {
-    let file = tempfile::NamedTempFile::new().expect("deployments file");
-    std::fs::write(file.path(), deployments).expect("write");
-    run_lib(
-        r#"rollback_target_version "$1""#,
-        &[file.path().to_str().expect("UTF-8 path")],
-    )
-}
+/// The rollback baseline's id, from the lib.
+const BASELINE: &str = "4c6ff923-be37-453a-a240-7c784072b76a";
 
 fn deployment(created_on: &str, versions: &[(&str, u32)]) -> String {
     let versions: Vec<String> = versions
@@ -455,110 +454,297 @@ fn deployment(created_on: &str, versions: &[(&str, u32)]) -> String {
         .map(|(id, pct)| format!(r#"{{"version_id":"{id}","percentage":{pct}}}"#))
         .collect();
     format!(
-        r#"{{"id":"d-{created_on}","created_on":"{created_on}","versions":[{}]}}"#,
+        r#"{{"id":"d-{created_on}","source":"wrangler","created_on":"{created_on}","versions":[{}]}}"#,
         versions.join(",")
     )
 }
 
+fn deployments(list: &[String]) -> String {
+    format!("[{}]", list.join(","))
+}
+
+/// `rollback_target_version` with `input` on stdin.
+fn rollback_target(input: &str) -> Output {
+    run_lib::<&str>("rollback_target_version", &[], Some(input))
+}
+
 /// The version at 100% in the most recent deployment before the current
-/// one, whatever order wrangler lists them in — what `wrangler rollback`
-/// picks with no id.
+/// one, whatever order wrangler lists them in.
 #[test]
 fn the_rollback_target_is_the_previous_deployments_full_version() {
-    let list = format!(
-        "[{},{},{}]",
-        deployment("2026-11-01T10:00:00Z", &[("old", 100)]),
-        deployment("2026-11-05T10:00:00Z", &[("new", 100)]),
-        deployment("2026-11-03T10:00:00Z", &[("previous", 100)]),
-    );
+    let list = deployments(&[
+        deployment("2026-11-01T10:00:00.000000Z", &[("old", 100)]),
+        deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)]),
+        deployment("2026-11-03T10:00:00.000000Z", &[("previous", 100)]),
+    ]);
     let out = rollback_target(&list);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "previous");
+    assert_eq!(stdout(&out), "previous");
 }
 
 /// A split deployment (a gradual rollout) has no version to return to; the
 /// one before it does.
 #[test]
 fn a_split_deployment_is_skipped() {
-    let list = format!(
-        "[{},{},{}]",
-        deployment("2026-11-01T10:00:00Z", &[("stable", 100)]),
-        deployment("2026-11-03T10:00:00Z", &[("a", 50), ("b", 50)]),
-        deployment("2026-11-05T10:00:00Z", &[("new", 100)]),
-    );
+    let list = deployments(&[
+        deployment("2026-11-01T10:00:00.000000Z", &[("stable", 100)]),
+        deployment("2026-11-03T10:00:00.000000Z", &[("a", 50), ("b", 50)]),
+        deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)]),
+    ]);
     let out = rollback_target(&list);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "stable");
+    assert_eq!(stdout(&out), "stable");
 }
 
-/// Only the current deployment, or a list that is not one: nothing to roll
-/// back to, said on stderr, and no id printed.
+/// A history with nothing before the current deployment (or nothing at
+/// all) has no target, said as such.
 #[test]
-fn no_earlier_deployment_is_an_error() {
+fn an_empty_history_has_no_target() {
     for list in [
-        format!("[{}]", deployment("2026-11-05T10:00:00Z", &[("new", 100)])),
+        deployments(&[deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)])]),
         "[]".to_string(),
-        "not json".to_string(),
     ] {
         let out = rollback_target(&list);
         assert!(!out.status.success(), "{list}");
-        assert_eq!(String::from_utf8_lossy(&out.stdout), "", "{list}");
+        assert_eq!(stdout(&out), "", "{list}");
         assert!(
-            stderr(&out).contains("no earlier deployment with a version at 100%"),
+            stderr(&out).contains("no earlier deployment has a version at 100%"),
             "{list}: {}",
             stderr(&out)
         );
     }
 }
 
-/// 9fbf49a3 carries secrets since deleted: refused, with the operator told
-/// to deploy forward. Any other version passes.
+/// Output that is not wrangler's JSON array is a parse failure, named as
+/// one, not an empty history.
 #[test]
-fn a_refused_version_is_never_rolled_back_to() {
-    let out = run_lib(
-        r#"check_rollback_target "$1""#,
-        &["9fbf49a3-d969-4b23-981b-eb55810cbd46"],
+fn malformed_deployments_json_is_a_parse_failure() {
+    for input in ["not json", "{\"versions\":[]}", ""] {
+        let out = rollback_target(input);
+        assert!(!out.status.success(), "{input:?}");
+        assert_eq!(stdout(&out), "", "{input:?}");
+        assert!(
+            stderr(&out).contains("could not parse wrangler's deployments list"),
+            "{input:?}: {}",
+            stderr(&out)
+        );
+    }
+}
+
+/// A stub `npx` for `rollback_to_previous`: logs each call's arguments, one
+/// line per call, and answers from files in its directory.
+struct Wrangler {
+    dir: tempfile::TempDir,
+}
+
+impl Wrangler {
+    /// `before` and `after` are the deployments lists wrangler returns
+    /// before and after the rollback; `versions` the `versions view` answers
+    /// by id (`created_on` each); `deploy_exit` what `versions deploy`
+    /// exits with.
+    fn new(before: &str, after: &str, versions: &[(&str, &str)], deploy_exit: i32) -> Self {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("stub dir");
+        let d = dir.path();
+        std::fs::write(d.join("deployments-0.json"), before).expect("write");
+        std::fs::write(d.join("deployments-1.json"), after).expect("write");
+        for (id, created_on) in versions {
+            std::fs::write(
+                d.join(format!("version-{id}.json")),
+                format!(
+                    r#"{{"id":"{id}","number":1,"metadata":{{"created_on":"{created_on}","source":"wrangler"}}}}"#
+                ),
+            )
+            .expect("write");
+        }
+        let stub = format!(
+            r#"#!/usr/bin/env bash
+d={dir}
+echo "$*" >>"$d/calls.log"
+[[ "$1" == wrangler@4 ]] || exit 99
+case "$2 $3" in
+  "deployments list")
+    n=$(cat "$d/listed" 2>/dev/null || echo 0)
+    echo $((n + 1)) >"$d/listed"
+    cat "$d/deployments-$n.json" ;;
+  "versions view") cat "$d/version-$4.json" ;;
+  "versions deploy") exit {deploy_exit} ;;
+  *) exit 98 ;;
+esac
+"#,
+            dir = d.display(),
+        );
+        let npx = d.join("npx");
+        std::fs::write(&npx, stub).expect("write stub");
+        std::fs::set_permissions(&npx, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        Self { dir }
+    }
+
+    fn rollback(&self) -> Output {
+        let mut cmd = Command::new("bash");
+        let path = format!(
+            "{}:{}",
+            self.dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        cmd.env("PATH", path);
+        run_lib_in(
+            cmd,
+            r#"rollback_to_previous "$1" "$2""#,
+            &["wrangler.toml", "post-deploy /_health failed (status: 500)"],
+            None,
+        )
+    }
+
+    fn calls(&self) -> Vec<String> {
+        std::fs::read_to_string(self.dir.path().join("calls.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+const BASELINE_AT: &str = "2026-10-31T07:27:07.123456Z";
+
+fn history() -> String {
+    deployments(&[
+        deployment("2026-11-01T10:00:00.000000Z", &[("previous", 100)]),
+        deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)]),
+    ])
+}
+
+fn rolled_back() -> String {
+    deployments(&[
+        deployment("2026-11-01T10:00:00.000000Z", &[("previous", 100)]),
+        deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)]),
+        deployment("2026-11-05T10:05:00.000000Z", &[("previous", 100)]),
+    ])
+}
+
+/// A target newer than the baseline is deployed at 100% with `versions
+/// deploy` (which never forces changed secrets back), never with `wrangler
+/// rollback`, and confirmed live.
+#[test]
+fn a_rollback_deploys_the_target_and_confirms_it_is_live() {
+    let w = Wrangler::new(
+        &history(),
+        &rolled_back(),
+        &[
+            (BASELINE, BASELINE_AT),
+            ("previous", "2026-11-01T09:59:00.5Z"),
+        ],
+        0,
     );
+    let out = w.rollback();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("Rolled back: previous is live"),
+        "{}",
+        stdout(&out)
+    );
+    let calls = w.calls();
+    assert!(
+        calls.contains(
+            &"wrangler@4 versions deploy previous@100% --config wrangler.toml \
+              --message post-deploy /_health failed (status: 500) --yes"
+                .to_string()
+        ),
+        "{calls:#?}"
+    );
+    assert!(!calls.iter().any(|c| c.contains(" rollback")), "{calls:#?}");
+}
+
+/// A target created before the baseline (before the reset) is refused:
+/// nothing is deployed, and the operator is told the new version is still
+/// live and to deploy forward from main.
+#[test]
+fn a_target_older_than_the_baseline_is_refused() {
+    let w = Wrangler::new(
+        &history(),
+        &history(),
+        &[
+            (BASELINE, BASELINE_AT),
+            ("previous", "2026-10-31T07:20:00.000001Z"),
+        ],
+        0,
+    );
+    let out = w.rollback();
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(
+        err.contains("refusing to roll back to previous: it predates the 2026-10-30 reset"),
+        "{err}"
+    );
+    assert!(err.contains("new is still live"), "{err}");
+    assert!(err.contains("Deploy forward from main"), "{err}");
+    let calls = w.calls();
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.contains("deploy ") || c.contains(" rollback")),
+        "{calls:#?}"
+    );
+}
+
+/// A target whose creation time cannot be read is refused the same way.
+#[test]
+fn a_target_that_cannot_be_dated_is_refused() {
+    let w = Wrangler::new(&history(), &history(), &[(BASELINE, BASELINE_AT)], 0);
+    let out = w.rollback();
     assert!(!out.status.success());
     assert!(
-        stderr(&out).contains("refusing to roll back to 9fbf49a3-d969-4b23-981b-eb55810cbd46"),
+        stderr(&out).contains("so previous is refused; new is still live"),
         "{}",
         stderr(&out)
     );
-    assert!(stderr(&out).contains("Deploy forward"), "{}", stderr(&out));
-
-    let out = run_lib(
-        r#"check_rollback_target "$1""#,
-        &["4c6ff923-be37-453a-a240-7c784072b76a"],
+    assert!(
+        !w.calls().iter().any(|c| c.contains("versions deploy")),
+        "{:#?}",
+        w.calls()
     );
-    assert!(out.status.success(), "{}", stderr(&out));
 }
 
-/// The deploy script names the version it rolls back to, after checking it:
-/// a bare `wrangler rollback` would pick its own target, refused or not.
+/// wrangler exits 0 when an operator declines its prompt: the deployments
+/// are read again, and a rollback that did not happen is reported as one.
 #[test]
-fn the_deploy_script_rolls_back_only_to_a_checked_version() {
-    let script = include_str!("../scripts/deploy-cloudflare.sh");
-    let code: Vec<&str> = script
-        .lines()
-        .filter(|l| !l.trim_start().starts_with('#'))
-        .collect();
-    let rollbacks: Vec<usize> = code
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.contains("wrangler@4 rollback"))
-        .map(|(i, _)| i)
-        .collect();
-    assert_eq!(rollbacks.len(), 1, "one rollback call");
-    let call = rollbacks[0];
-    assert!(
-        code[call].contains(r#"rollback "$target""#),
-        "{}",
-        code[call]
+fn a_rollback_that_did_not_happen_is_reported() {
+    let w = Wrangler::new(
+        &history(),
+        &history(),
+        &[
+            (BASELINE, BASELINE_AT),
+            ("previous", "2026-11-01T09:59:00Z"),
+        ],
+        0,
     );
-    let check = code
-        .iter()
-        .position(|l| l.contains(r#"check_rollback_target "$target" || exit 1"#))
-        .expect("the target is checked");
-    assert!(check < call, "checked before the rollback");
+    let out = w.rollback();
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("rollback did not happen; new is still live"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+/// A deploy wrangler refuses (secrets changed since the target, say) is a
+/// failed rollback, with the new version named as still live.
+#[test]
+fn a_refused_deploy_is_a_failed_rollback() {
+    let w = Wrangler::new(
+        &history(),
+        &history(),
+        &[
+            (BASELINE, BASELINE_AT),
+            ("previous", "2026-11-01T09:59:00Z"),
+        ],
+        1,
+    );
+    let out = w.rollback();
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("the rollback to previous failed; new is still live"),
+        "{}",
+        stderr(&out)
+    );
 }
