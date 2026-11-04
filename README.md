@@ -60,11 +60,9 @@ One-time setup on a Cloudflare account: a D1 database (`npx wrangler@4 d1 create
 
 ### Rolling back
 
-A version that `wrangler rollback` returns to runs without its prepared plan. Once a newer version has been deployed, the older version's isolates assemble the runtime dynamically on every cold start, reading D1 to do it (seen live on impresspress's fullapp-test Worker, 2026-11-04; most likely because its plan is no longer the current deployment record). It serves every path correctly while D1 answers. During a D1 outage, though, its cold isolates answer static files too (`/`, `/styles.css`) with 503, where a version promoted with its plan keeps serving them. So:
+The gate rolls back on anything `health_gate_verdict` (`scripts/lib/deploy-checks.sh`) does not read as healthy or as an outage: a fault the health body names (a required key unset, a config source fault, a `failed` runtime, a block that keeps failing its `Init` while its config answers), but also any status other than 200 or 503 (a 500, an Error 1102 page, curl's `000` for a timeout or no connection), a 503 that is not JSON and carries no `Retry-After`, a 503 health body that names no cause, and JSON that is not the health body. The rule list there gives each rule's reason and the case it misjudges.
 
-- Roll back only for a fault of the new version — what the gate rolls back for. In an outage, keep the version that is live; rolling back widens the outage.
-- After a rollback, deploy forward from a fixed commit soon rather than serving from the rolled-back version for long.
-- Never roll back to version `9fbf49a3`: it carries secrets since deleted from the Worker.
+A rollback names its target: the version at 100% in the deployment before the new one (what `wrangler rollback` picks on its own), read from `wrangler deployments list` first. A version listed in `REFUSED_ROLLBACK_VERSIONS` (deploy-checks.sh) is refused before anything changes, and the new version stays live; deploy forward instead. Version `9fbf49a3` is listed — it carries secrets since deleted from the Worker — so never roll back to it by hand either.
 
 ### First admin on a fresh database
 

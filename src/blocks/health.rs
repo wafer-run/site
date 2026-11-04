@@ -75,7 +75,12 @@
 //! block's config is a top-level `failed` while the runtime that was built
 //! before it is `ok`. The deploy gate (`scripts/lib/deploy-checks.sh`,
 //! `health_gate_verdict`) tells those cases apart, which a merged list could
-//! not.
+//! not — all but one: a D1 outage that begins after a runtime's variables
+//! read succeeded and during a block's `Init` also reads `runtime: degraded`
+//! with every config read answering (from that runtime's snapshot) for as
+//! long as it lasts, because impresspress's failed backend check builds
+//! nothing and the body does not say it failed. deploy-checks.sh records
+//! the gap.
 //!
 //! ## What it costs
 //!

@@ -10,6 +10,9 @@
 //!   the health block never sends; `health_gate_retry_delay` asks once more
 //!   after a 503's `Retry-After`. The health block's own answers are checked
 //!   against the gate in tests/health_unavailable.rs.
+//! - `rollback_target_version` resolves the version a rollback returns to
+//!   from `wrangler deployments list --json`, and `check_rollback_target`
+//!   refuses the versions in `REFUSED_ROLLBACK_VERSIONS`.
 
 use std::{
     path::{Path, PathBuf},
@@ -425,4 +428,137 @@ fn a_fetch_that_cannot_connect_leaves_no_earlier_answer() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "000");
     assert_eq!(std::fs::read_to_string(headers.path()).unwrap(), "");
     assert_eq!(std::fs::read_to_string(body.path()).unwrap(), "");
+}
+
+/// Run `script` (bash, with the lib sourced and `$1`.. set to `args`).
+fn run_lib(script: &str, args: &[&str]) -> Output {
+    Command::new("bash")
+        .args(["-c", &format!(r#"source "$0" && {script}"#), LIB])
+        .args(args)
+        .output()
+        .expect("run bash")
+}
+
+/// `rollback_target_version` on `deployments` (the JSON wrangler prints).
+fn rollback_target(deployments: &str) -> Output {
+    let file = tempfile::NamedTempFile::new().expect("deployments file");
+    std::fs::write(file.path(), deployments).expect("write");
+    run_lib(
+        r#"rollback_target_version "$1""#,
+        &[file.path().to_str().expect("UTF-8 path")],
+    )
+}
+
+fn deployment(created_on: &str, versions: &[(&str, u32)]) -> String {
+    let versions: Vec<String> = versions
+        .iter()
+        .map(|(id, pct)| format!(r#"{{"version_id":"{id}","percentage":{pct}}}"#))
+        .collect();
+    format!(
+        r#"{{"id":"d-{created_on}","created_on":"{created_on}","versions":[{}]}}"#,
+        versions.join(",")
+    )
+}
+
+/// The version at 100% in the most recent deployment before the current
+/// one, whatever order wrangler lists them in — what `wrangler rollback`
+/// picks with no id.
+#[test]
+fn the_rollback_target_is_the_previous_deployments_full_version() {
+    let list = format!(
+        "[{},{},{}]",
+        deployment("2026-11-01T10:00:00Z", &[("old", 100)]),
+        deployment("2026-11-05T10:00:00Z", &[("new", 100)]),
+        deployment("2026-11-03T10:00:00Z", &[("previous", 100)]),
+    );
+    let out = rollback_target(&list);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "previous");
+}
+
+/// A split deployment (a gradual rollout) has no version to return to; the
+/// one before it does.
+#[test]
+fn a_split_deployment_is_skipped() {
+    let list = format!(
+        "[{},{},{}]",
+        deployment("2026-11-01T10:00:00Z", &[("stable", 100)]),
+        deployment("2026-11-03T10:00:00Z", &[("a", 50), ("b", 50)]),
+        deployment("2026-11-05T10:00:00Z", &[("new", 100)]),
+    );
+    let out = rollback_target(&list);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "stable");
+}
+
+/// Only the current deployment, or a list that is not one: nothing to roll
+/// back to, said on stderr, and no id printed.
+#[test]
+fn no_earlier_deployment_is_an_error() {
+    for list in [
+        format!("[{}]", deployment("2026-11-05T10:00:00Z", &[("new", 100)])),
+        "[]".to_string(),
+        "not json".to_string(),
+    ] {
+        let out = rollback_target(&list);
+        assert!(!out.status.success(), "{list}");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "", "{list}");
+        assert!(
+            stderr(&out).contains("no earlier deployment with a version at 100%"),
+            "{list}: {}",
+            stderr(&out)
+        );
+    }
+}
+
+/// 9fbf49a3 carries secrets since deleted: refused, with the operator told
+/// to deploy forward. Any other version passes.
+#[test]
+fn a_refused_version_is_never_rolled_back_to() {
+    let out = run_lib(
+        r#"check_rollback_target "$1""#,
+        &["9fbf49a3-d969-4b23-981b-eb55810cbd46"],
+    );
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("refusing to roll back to 9fbf49a3-d969-4b23-981b-eb55810cbd46"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(stderr(&out).contains("Deploy forward"), "{}", stderr(&out));
+
+    let out = run_lib(
+        r#"check_rollback_target "$1""#,
+        &["4c6ff923-be37-453a-a240-7c784072b76a"],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+}
+
+/// The deploy script names the version it rolls back to, after checking it:
+/// a bare `wrangler rollback` would pick its own target, refused or not.
+#[test]
+fn the_deploy_script_rolls_back_only_to_a_checked_version() {
+    let script = include_str!("../scripts/deploy-cloudflare.sh");
+    let code: Vec<&str> = script
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .collect();
+    let rollbacks: Vec<usize> = code
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.contains("wrangler@4 rollback"))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(rollbacks.len(), 1, "one rollback call");
+    let call = rollbacks[0];
+    assert!(
+        code[call].contains(r#"rollback "$target""#),
+        "{}",
+        code[call]
+    );
+    let check = code
+        .iter()
+        .position(|l| l.contains(r#"check_rollback_target "$target" || exit 1"#))
+        .expect("the target is checked");
+    assert!(check < call, "checked before the rollback");
 }

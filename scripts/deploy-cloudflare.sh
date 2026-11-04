@@ -71,7 +71,7 @@ if [[ "$cmd" == "build" || "$cmd" == "deploy" ]]; then
   echo "siblings at the ci.yml pins"
 fi
 if [[ "$cmd" == "deploy" ]] && ! command -v jq >/dev/null 2>&1; then
-  echo "error: the post-deploy /_health gate needs jq" >&2
+  echo "error: the post-deploy /_health gate and its rollback need jq" >&2
   exit 1
 fi
 
@@ -137,22 +137,13 @@ case "$cmd" in
     # deploy` stops at `/_deploy/prepare` or at the candidate smoke
     # (impresspress.toml `deploy_smoke_paths`), before promotion, with the
     # live version untouched. Here, after promotion, `health_gate_verdict`
-    # (scripts/lib/deploy-checks.sh, where each rule is listed) decides:
-    #   - rollback: the new version is at fault (`broken` or `failed`
-    #     entries, a `failed` runtime, a block that keeps failing its `Init`
-    #     while D1 answers, a 500, no answer, or a body that is not the
-    #     health block's). `wrangler rollback` returns to the previous
-    #     version, which on a first deploy is the CLI's 503 placeholder;
-    #   - outage: read as D1 failing after promotion (a `degraded` or `stale`
-    #     runtime with no deploy-caused entry, or the Worker's plain-text 503
-    #     with `Retry-After`). That says nothing about the new version, and
-    #     the previous one would answer no better: a rolled-back version runs
-    #     without its prepared plan, so its cold isolates answer even static
-    #     files with 503 while D1 is down (README, "Rolling back"). Keep it,
-    #     report and exit non-zero. The plain-text 503 can also be a request
-    #     that waited on another request's failed build of any class
-    #     (deploy-checks.sh says why), so the message says to check the body
-    #     and the Worker logs.
+    # (scripts/lib/deploy-checks.sh, the one list of its rules and why)
+    # decides `healthy`, `outage` (keep the new version, report and exit
+    # non-zero) or `rollback`. A rollback returns to the version at 100% in
+    # the deployment before this one — on a first deploy the CLI's 503
+    # placeholder — resolved first (`rollback_target_version`) so a version
+    # listed in REFUSED_ROLLBACK_VERSIONS is refused before anything changes
+    # (`check_rollback_target`); the operator then deploys forward.
     # A 503 carrying `Retry-After` is asked once more after that delay (at
     # most 60 s), and only the second answer is judged: one isolate's blip
     # clears within its own window, an outage or a fault answers the same.
@@ -191,8 +182,22 @@ case "$cmd" in
           echo "error: $health_url returned $status — rolling back" >&2
           cat "$health_body" >&2 || true
           echo >&2
-          npx wrangler@4 rollback --config "$WRANGLER_TOML" \
-            --message "post-deploy /_health failed (status: $status)" || true
+          deployments=$(mktemp)
+          trap 'rm -f "$health_headers" "$health_body" "$deployments"' EXIT
+          if ! npx wrangler@4 deployments list --config "$WRANGLER_TOML" --json >"$deployments"; then
+            echo "error: could not list the Worker's deployments; the new version stays live." >&2
+            echo "       Roll back by hand to a vetted version id, or deploy forward." >&2
+            exit 1
+          fi
+          target=$(rollback_target_version "$deployments") || {
+            echo "       The new version stays live; deploy forward." >&2
+            exit 1
+          }
+          check_rollback_target "$target" || exit 1
+          if ! npx wrangler@4 rollback "$target" --config "$WRANGLER_TOML" \
+            --message "post-deploy /_health failed (status: $status)"; then
+            echo "error: the rollback to $target failed; the new version may still be live." >&2
+          fi
           exit 1
           ;;
       esac

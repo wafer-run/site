@@ -108,8 +108,9 @@ health_gate_retry_delay() {
 #
 #   healthy  — 200.
 #   outage   — the backend (D1) is failing, which says nothing about the new
-#              version: the previous version would answer the same, so it is
-#              kept, and the script reports and exits non-zero. Any of:
+#              version, and rolling back would not bring D1 back: the new
+#              version is kept, and the script reports and exits non-zero.
+#              Any of:
 #              - a 503 with `Retry-After` whose body is not JSON: the Worker's
 #                own plain-text 503. impresspress sends it when no runtime
 #                could be built inside a transient retry window, but also to
@@ -121,11 +122,15 @@ health_gate_retry_delay() {
 #                the rebuild owner, or lands in the fault's window). The root
 #                fix, a waiter answering the owner's class, is impresspress's;
 #              - the health body with empty `broken` and `failed`, and
-#                `runtime.status` `stale`. Only a transiently failed rebuild
-#                makes a runtime stale: an outage, or rarely a block of the
-#                new version whose own `Init` resets D1 so that the
-#                rebuild's reads fail too (IP-C logs a block retrying across
-#                8 runtimes at `error`);
+#                `runtime.status` `stale`: the runtime serves config older
+#                than the database's because a transient failure stopped its
+#                replacement — a rebuild failed and the runtime it was
+#                replacing serves on, the backend check before a hand-off
+#                failed, or a cold isolate whose dynamic build failed serves
+#                its version's packaged plan (impresspress U-B1). An outage,
+#                or rarely a block of the new version whose own `Init` resets
+#                D1 so that the rebuild's reads fail too (IP-C logs a block
+#                retrying across 8 runtimes at `error`);
 #              - the same with `runtime.status` `degraded`, unless blocks are
 #                listed as not serving while every block's config answered
 #                (see below). A `degraded` runtime that lists no block (its
@@ -140,9 +145,19 @@ health_gate_retry_delay() {
 #              - `runtime.status` `failed` (a block's `Init`, or a rebuild,
 #                failed for good);
 #              - `runtime.status` `degraded` with blocks not serving while
-#                every block's config answered (`degraded` empty): a block
-#                whose own `Init` keeps failing transiently — resetting D1
-#                itself, say — with the database otherwise answering;
+#                every block's config answered (`degraded` empty): read as a
+#                block whose own `Init` keeps failing transiently — resetting
+#                D1 itself, say — with the database otherwise answering.
+#                Known misjudgement: an outage that begins after a runtime's
+#                variables read succeeded and during a block's `Init` gives
+#                the same body for as long as it lasts. The config lists come
+#                from that runtime's variables snapshot, and impresspress's
+#                retry checks D1 with one read before it rebuilds; a failed
+#                check builds nothing (`GateFailed`), so the runtime stays
+#                `degraded` instead of turning `stale`, and the body does not
+#                say the check failed. That outage is rolled back. The fix is
+#                impresspress's: the health body naming a failed backend
+#                check, which this rule would then read as an outage;
 #              - a 503 naming nothing, any other status (a 500, curl's 000),
 #                JSON that is not the health body, or a non-JSON 503 without
 #                `Retry-After`.
@@ -178,4 +193,51 @@ health_gate_verdict() {
     elif .runtime.status == "ok" and (.degraded | length) > 0 then "outage"
     else "rollback" end
   ' "$body_file"
+}
+
+# Worker versions `deploy-cloudflare.sh` never rolls back to, one per line:
+# the version id, then why. 9fbf49a3 is the same code as its successor but
+# carries secrets since deleted from the Worker (the bootstrap-admin token
+# among them), which a rollback to it would bring back.
+REFUSED_ROLLBACK_VERSIONS='9fbf49a3-d969-4b23-981b-eb55810cbd46 carries secrets since deleted from the Worker'
+
+# The version a rollback returns to: the one at 100% in the most recent
+# deployment before the current one — what `wrangler rollback` picks with no
+# version id (its `fetchDefaultRollbackVersionId`), resolved here so the
+# script can refuse it before anything changes.
+#
+# Usage: rollback_target_version DEPLOYMENTS_JSON
+# DEPLOYMENTS_JSON is what `wrangler deployments list --json` wrote. Prints
+# the version id, or prints an error to stderr and returns 1 when no earlier
+# deployment has a version at 100%.
+rollback_target_version() {
+  local deployments_json=$1 version
+  version=$(jq -r '
+    sort_by(.created_on) | reverse | .[1:]
+    | map(.versions // [] | map(select(.percentage == 100)) | .[0].version_id // empty)
+    | .[0] // empty
+  ' "$deployments_json" 2>/dev/null) || version=
+  if [[ -z "$version" ]]; then
+    echo "error: no earlier deployment with a version at 100% in $deployments_json" >&2
+    return 1
+  fi
+  echo "$version"
+}
+
+# Refuse a rollback target listed in REFUSED_ROLLBACK_VERSIONS.
+#
+# Usage: check_rollback_target VERSION_ID
+# Returns 0 when the version may be rolled back to; otherwise prints why to
+# stderr and returns 1.
+check_rollback_target() {
+  local version=$1 id reason
+  while read -r id reason; do
+    [[ -n "$id" ]] || continue
+    if [[ "$version" == "$id" ]]; then
+      echo "error: refusing to roll back to $version: $reason." >&2
+      echo "       Deploy forward instead: fix the commit and run this script again." >&2
+      return 1
+    fi
+  done <<<"$REFUSED_ROLLBACK_VERSIONS"
+  return 0
 }
