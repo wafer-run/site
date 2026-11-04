@@ -58,6 +58,14 @@ A deploy is one command. `impresspress deploy --target cloudflare` deploys the p
 
 One-time setup on a Cloudflare account: a D1 database (`npx wrangler@4 d1 create wafer-site-prod`, id into the env file as `IMPRESSPRESS_CLOUDFLARE_D1_DATABASE_ID`), an R2 bucket (`npx wrangler@4 r2 bucket create wafer-site-assets`) and the `CONFIG_CACHE` KV namespace (id in `wrangler.overrides.toml`), plus `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the env file. `.env.example`'s Cloudflare section lists them.
 
+### Rolling back
+
+A version that `wrangler rollback` returns to runs without its prepared plan. Once a newer version has been deployed, the older version's isolates assemble the runtime dynamically on every cold start, reading D1 to do it (seen live on impresspress's fullapp-test Worker, 2026-11-04; most likely because its plan is no longer the current deployment record). It serves every path correctly while D1 answers. During a D1 outage, though, its cold isolates answer static files too (`/`, `/styles.css`) with 503, where a version promoted with its plan keeps serving them. So:
+
+- Roll back only for a fault of the new version — what the gate rolls back for. In an outage, keep the version that is live; rolling back widens the outage.
+- After a rollback, deploy forward from a fixed commit soon rather than serving from the rolled-back version for long.
+- Never roll back to version `9fbf49a3`: it carries secrets since deleted from the Worker.
+
 ### First admin on a fresh database
 
 On Cloudflare every setting is a row of D1's variables table, and only an admin can edit one, so a fresh database needs a first admin before anything else is configured:

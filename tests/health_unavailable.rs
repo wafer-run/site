@@ -183,7 +183,7 @@ fn episode(retry_in_secs: u64, failed: bool) -> RetryEpisode {
     RetryEpisode {
         since_ms: now - 120_000,
         retry_at_ms: now + retry_in_secs * 1_000,
-        rebuilds: 3,
+        retries: 3,
         failed,
     }
 }
@@ -415,7 +415,7 @@ async fn a_runtime_degraded_with_no_block_listed_is_an_outage() {
     assert_eq!(h.body["degraded"], serde_json::json!([]));
     assert_eq!(h.body["runtime"]["status"], "degraded");
     assert_eq!(h.body["runtime"]["unavailable"], serde_json::json!([]));
-    assert_eq!(h.body["runtime"]["rebuilds"], 3);
+    assert_eq!(h.body["runtime"]["retries"], 3);
     let retry_in = h.body["runtime"]["retry_in"].as_u64().unwrap();
     assert!(
         (1..=7).contains(&retry_in),

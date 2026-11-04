@@ -145,11 +145,14 @@ case "$cmd" in
     #     version, which on a first deploy is the CLI's 503 placeholder;
     #   - outage: read as D1 failing after promotion (a `degraded` or `stale`
     #     runtime with no deploy-caused entry, or the Worker's plain-text 503
-    #     with `Retry-After`). That says nothing about the new version and
-    #     the previous one would answer the same, so keep it, report and exit
-    #     non-zero. The plain-text 503 can also be a request that waited on
-    #     another request's failed build of any class (deploy-checks.sh says
-    #     why), so the message says to check the body and the Worker logs.
+    #     with `Retry-After`). That says nothing about the new version, and
+    #     the previous one would answer no better: a rolled-back version runs
+    #     without its prepared plan, so its cold isolates answer even static
+    #     files with 503 while D1 is down (README, "Rolling back"). Keep it,
+    #     report and exit non-zero. The plain-text 503 can also be a request
+    #     that waited on another request's failed build of any class
+    #     (deploy-checks.sh says why), so the message says to check the body
+    #     and the Worker logs.
     # A 503 carrying `Retry-After` is asked once more after that delay (at
     # most 60 s), and only the second answer is judged: one isolate's blip
     # clears within its own window, an outage or a fault answers the same.

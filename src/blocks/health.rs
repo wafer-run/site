@@ -17,7 +17,7 @@
 //!
 //! ```text
 //! { "ok": [..], "broken": [..], "degraded": [..], "failed": [..],
-//!   "runtime": { "status": .., "since"?, "retry_in"?, "rebuilds"?, "unavailable"? } }
+//!   "runtime": { "status": .., "since"?, "retry_in"?, "retries"?, "unavailable"? } }
 //! ```
 //!
 //! The four lists answer question 1, one entry per block, each sorted by
