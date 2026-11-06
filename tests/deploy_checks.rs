@@ -445,6 +445,171 @@ fn a_fetch_that_cannot_connect_leaves_no_earlier_answer() {
     assert_eq!(std::fs::read_to_string(body.path()).unwrap(), "");
 }
 
+/// impresspress RELEASE.md's `/health` example at IMPRESSPRESS_REF ("`/health`
+/// says whether D1 failed the last attempt"), verbatim: the runtime as the
+/// health block nests it. Each `backend` rule below varies one field of it.
+const RT_RELEASE_FAILING: &str = r#"{"status":"degraded","since":"2026-11-05T10:00:00.000Z","retry_in":4,"retries":3,
+ "backend":{"status":"failing","since":"2026-11-05T10:00:00.300Z","checked":"2026-11-05T10:00:04.500Z"},
+ "unavailable":[{"block":"wafer-run/auth","class":"retrying","retry_in":4,"since":"2026-11-05T10:00:00.000Z","runtimes":1}]}"#;
+
+/// [`RT_RELEASE_FAILING`] with each `(from, to)` replaced, once each.
+fn release_runtime(edits: &[(&str, &str)]) -> String {
+    let mut rt = RT_RELEASE_FAILING.to_string();
+    for (from, to) in edits {
+        assert_eq!(rt.matches(from).count(), 1, "{from} in {rt}");
+        rt = rt.replacen(from, to, 1);
+    }
+    rt
+}
+
+const BACKEND_OK: (&str, &str) = (
+    r#""backend":{"status":"failing""#,
+    r#""backend":{"status":"ok""#,
+);
+const NOTHING_LISTED: (&str, &str) = (
+    r#""unavailable":[{"block":"wafer-run/auth","class":"retrying","retry_in":4,"since":"2026-11-05T10:00:00.000Z","runtimes":1}]"#,
+    r#""unavailable":[]"#,
+);
+
+/// A 503 health body with `runtime` and empty config lists, judged after the
+/// retry (it carries `Retry-After`, as every non-`ok` answer does).
+fn backend_verdict(runtime: &str) -> String {
+    verdict("503", Some("4"), &body("[]", "[]", "[]", runtime))
+}
+
+/// Rule 7, `failing`: D1 could not answer the last attempt — an outage,
+/// whatever the runtime lists (the body #282's gate rolled back).
+#[test]
+fn a_failing_backend_is_an_outage() {
+    assert_eq!(backend_verdict(RT_RELEASE_FAILING), "outage");
+    assert_eq!(
+        backend_verdict(&release_runtime(&[NOTHING_LISTED])),
+        "outage"
+    );
+    assert_eq!(
+        backend_verdict(&release_runtime(&[(
+            r#""status":"degraded""#,
+            r#""status":"stale""#
+        )])),
+        "outage"
+    );
+    // Config entries the source could not answer change nothing.
+    assert_eq!(
+        verdict(
+            "503",
+            Some("4"),
+            &body("[]", r#"["wafer-run/auth"]"#, "[]", RT_RELEASE_FAILING)
+        ),
+        "outage"
+    );
+}
+
+/// Rule 6 outranks `backend`: a `failed` runtime rolls back even while D1
+/// is failing.
+#[test]
+fn a_failed_runtime_rolls_back_whatever_the_backend() {
+    let failed = (r#""status":"degraded""#, r#""status":"failed""#);
+    assert_eq!(backend_verdict(&release_runtime(&[failed])), "rollback");
+    assert_eq!(
+        backend_verdict(&release_runtime(&[failed, BACKEND_OK])),
+        "rollback"
+    );
+}
+
+/// Rule 7, `ok`: D1 answered, so blocks still listed fail on their own.
+#[test]
+fn blocks_listed_while_the_backend_answers_roll_back() {
+    assert_eq!(backend_verdict(&release_runtime(&[BACKEND_OK])), "rollback");
+    // Contention is D1 answering too.
+    assert_eq!(
+        backend_verdict(&release_runtime(&[
+            BACKEND_OK,
+            (
+                r#""runtimes":1}"#,
+                r#""runtimes":1,"detail_code":"database.contended"}"#
+            ),
+        ])),
+        "rollback"
+    );
+    // Even with a config entry the source could not answer.
+    assert_eq!(
+        verdict(
+            "503",
+            Some("4"),
+            &body(
+                "[]",
+                r#"["wafer-run/auth"]"#,
+                "[]",
+                &release_runtime(&[BACKEND_OK])
+            )
+        ),
+        "rollback"
+    );
+}
+
+/// Rule 7, `ok`: `stale`, or `degraded` with nothing listed, is an outage.
+#[test]
+fn stale_or_unlisted_while_the_backend_answers_is_an_outage() {
+    assert_eq!(
+        backend_verdict(&release_runtime(&[
+            BACKEND_OK,
+            (r#""status":"degraded""#, r#""status":"stale""#),
+        ])),
+        "outage"
+    );
+    assert_eq!(
+        backend_verdict(&release_runtime(&[BACKEND_OK, NOTHING_LISTED])),
+        "outage"
+    );
+}
+
+/// Rule 7, the rest: a `backend.status` the health block never sends, or an
+/// `ok` runtime naming no cause, rolls back.
+#[test]
+fn other_backend_answers_roll_back() {
+    assert_eq!(
+        backend_verdict(&release_runtime(&[(
+            r#""backend":{"status":"failing""#,
+            r#""backend":{"status":"unknown""#,
+        )])),
+        "rollback"
+    );
+    assert_eq!(
+        backend_verdict(r#"{"status":"ok","backend":{"status":"ok"}}"#),
+        "rollback"
+    );
+}
+
+/// Rule 8: without `backend` (native, an older version) the earlier rules
+/// stand — the RELEASE example less its `backend` is a block failing with
+/// its config answering.
+#[test]
+fn without_a_backend_the_earlier_rules_stand() {
+    let no_backend = (
+        r#"
+ "backend":{"status":"failing","since":"2026-11-05T10:00:00.300Z","checked":"2026-11-05T10:00:04.500Z"},"#,
+        "",
+    );
+    assert_eq!(backend_verdict(&release_runtime(&[no_backend])), "rollback");
+    assert_eq!(
+        verdict(
+            "503",
+            Some("4"),
+            &body(
+                "[]",
+                r#"["wafer-run/auth"]"#,
+                "[]",
+                &release_runtime(&[no_backend])
+            )
+        ),
+        "outage"
+    );
+    assert_eq!(
+        backend_verdict(&release_runtime(&[no_backend, NOTHING_LISTED])),
+        "outage"
+    );
+}
+
 /// The rollback baseline's id, from the lib.
 const BASELINE: &str = "4c6ff923-be37-453a-a240-7c784072b76a";
 

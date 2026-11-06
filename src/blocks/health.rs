@@ -17,7 +17,7 @@
 //!
 //! ```text
 //! { "ok": [..], "broken": [..], "degraded": [..], "failed": [..],
-//!   "runtime": { "status": .., "since"?, "retry_in"?, "retries"?, "unavailable"? } }
+//!   "runtime": { "status": .., "since"?, "retry_in"?, "retries"?, "backend"?, "unavailable"? } }
 //! ```
 //!
 //! The four lists answer question 1, one entry per block, each sorted by
@@ -39,15 +39,19 @@
 //! serializes it, so one parser reads both endpoints:
 //!
 //! - `ok`: every block serves;
-//! - `degraded`: a block does not serve (its `Init` is retrying), or the
-//!   runtime's variables read failed after it was published;
+//! - `degraded`: a block does not serve (its `Init` is retrying), the
+//!   runtime's variables read failed after it was published, or the
+//!   platform's last attempt found the backend failing;
 //! - `stale`: the runtime serves config older than the database's, which
 //!   happens only during an outage (a rebuild failed and the old runtime
 //!   serves on, or a new isolate serves the deploy's packaged plan);
 //! - `failed`: a block's `Init` failed for good, or the last rebuild did.
 //!
 //! `unavailable` lists the blocks that do not serve, by `Init` state
-//! (`retrying`, `failed`, `initializing`, `not_initialized`).
+//! (`retrying`, `failed`, `initializing`, `not_initialized`). On Cloudflare
+//! a non-`ok` body also carries `backend` (`status` `ok` or `failing`, with
+//! `since` and `checked`): what the isolate's last settled attempt found of
+//! D1.
 //!
 //! 200 only when the four lists' `broken`, `degraded` and `failed` are empty
 //! and `runtime.status` is `ok`; anything else is 503. Never cached
@@ -75,12 +79,11 @@
 //! block's config is a top-level `failed` while the runtime that was built
 //! before it is `ok`. The deploy gate (`scripts/lib/deploy-checks.sh`,
 //! `health_gate_verdict`) tells those cases apart, which a merged list could
-//! not — all but one: a D1 outage that begins after a runtime's variables
-//! read succeeded and during a block's `Init` also reads `runtime: degraded`
-//! with every config read answering (from that runtime's snapshot) for as
-//! long as it lasts, because impresspress's failed backend check builds
-//! nothing and the body does not say it failed. deploy-checks.sh records
-//! the gap.
+//! not. A D1 outage that begins after a runtime's variables read succeeded
+//! and during a block's `Init` also reads `runtime: degraded` with every
+//! config read answering (from that runtime's snapshot); on Cloudflare
+//! `runtime.backend` (`failing` there, `ok` for the block at fault) is what
+//! tells it from the block's own failure.
 //!
 //! ## What it costs
 //!

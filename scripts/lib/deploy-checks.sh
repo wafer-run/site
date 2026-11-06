@@ -104,63 +104,76 @@ health_gate_retry_delay() {
 # Decide what a post-promotion `/_health` answer means.
 #
 # Usage: health_gate_verdict STATUS HEADERS_FILE BODY_FILE
-# (the HTTP status, the headers `curl -D` wrote, and the body). Prints one of:
+# (the HTTP status, the headers `curl -D` wrote, and the body). Prints
+# `healthy`, `outage` or `rollback`.
 #
-#   healthy  — 200.
-#   outage   — the backend (D1) is failing, which says nothing about the new
-#              version, and rolling back would not bring D1 back: the new
-#              version is kept, and the script reports and exits non-zero.
-#              Any of:
-#              - a 503 with `Retry-After` whose body is not JSON: the Worker's
-#                own plain-text 503. impresspress sends it when no runtime
-#                could be built inside a transient retry window, but also to
-#                a request that waited on another request's failed build
-#                whatever that build's class (a permanent fault included),
-#                and when the build slot stayed busy. This gate cannot tell
-#                those apart, so it reads them all as an outage; the one
-#                retry usually turns a fault into its 500 (the retry becomes
-#                the rebuild owner, or lands in the fault's window). The root
-#                fix, a waiter answering the owner's class, is impresspress's;
-#              - the health body with empty `broken` and `failed`, and
-#                `runtime.status` `stale`: the runtime serves config older
-#                than the database's because a transient failure stopped its
-#                replacement — a rebuild failed and the runtime it was
-#                replacing serves on, the backend check before a hand-off
-#                failed, or a cold isolate whose dynamic build failed serves
-#                its version's packaged plan (impresspress U-B1). An outage,
-#                or rarely a block of the new version whose own `Init` resets
-#                D1 so that the rebuild's reads fail too (IP-C logs a block
-#                retrying across 8 runtimes at `error`);
-#              - the same with `runtime.status` `degraded`, unless blocks are
-#                listed as not serving while every block's config answered
-#                (see below). A `degraded` runtime that lists no block (its
-#                variables read failed after it was published) is an outage
-#                whatever the config lists hold;
-#              - the same with `runtime.status` `ok` and `degraded` config
-#                entries (the config source failed transiently).
-#   rollback — the new version is at fault, or the answer is not one the
-#              health block gives during an outage:
-#              - `broken` entries (a required key unset) or `failed` entries
-#                (the config source faulted);
-#              - `runtime.status` `failed` (a block's `Init`, or a rebuild,
-#                failed for good);
-#              - `runtime.status` `degraded` with blocks not serving while
-#                every block's config answered (`degraded` empty): read as a
-#                block whose own `Init` keeps failing transiently — resetting
-#                D1 itself, say — with the database otherwise answering.
-#                Known misjudgement: an outage that begins after a runtime's
-#                variables read succeeded and during a block's `Init` gives
-#                the same body for as long as it lasts. The config lists come
-#                from that runtime's variables snapshot, and impresspress's
-#                retry checks D1 with one read before it rebuilds; a failed
-#                check builds nothing (`GateFailed`), so the runtime stays
-#                `degraded` instead of turning `stale`, and the body does not
-#                say the check failed. That outage is rolled back. The fix is
-#                impresspress's: the health body naming a failed backend
-#                check, which this rule would then read as an outage;
-#              - a 503 naming nothing, any other status (a 500, curl's 000),
-#                JSON that is not the health body, or a non-JSON 503 without
-#                `Retry-After`.
+# - `outage`: the backend (D1) is failing, which says nothing about the new
+#   version, and rolling back would not bring D1 back. The new version is
+#   kept, and the script reports and exits non-zero.
+# - `rollback`: the new version is at fault, or the answer is not one the
+#   health block gives during an outage.
+#
+# The rules, in order (the first that applies decides):
+#
+#  1. 200 → healthy.
+#  2. Any status but 503 (a 500, an Error 1102 page, curl's 000) → rollback.
+#  3. A 503 whose body is not JSON → outage when it carries `Retry-After`,
+#     rollback otherwise. With `Retry-After` it is the Worker's own
+#     plain-text 503: impresspress sends it when no runtime could be built
+#     inside a transient retry window, but also to a request that waited on
+#     another request's failed build whatever that build's class (a permanent
+#     fault included), and when the build slot stayed busy. This gate cannot
+#     tell those apart, so it reads them all as an outage; the one retry
+#     usually turns a fault into its 500 (the retry becomes the rebuild
+#     owner, or lands in the fault's window). The root fix, a waiter
+#     answering the owner's class, is impresspress's.
+#  4. JSON that is not the health body (the four lists, and `runtime` with a
+#     string `status`) → rollback.
+#  5. `broken` entries (a required key unset) or `failed` entries (the config
+#     source faulted) → rollback.
+#  6. `runtime.status` `failed` (a block's `Init`, or a rebuild, failed for
+#     good) → rollback, whatever `runtime.backend` says. A block that turns
+#     a D1 outage into a permanent error is read as a fault here too.
+#  7. With `runtime.backend` (impresspress on Cloudflare: what the isolate's
+#     last settled attempt found of D1, RELEASE.md "`/health` says whether D1
+#     failed the last attempt"):
+#     - `backend.status` `failing` → outage. D1 itself could not answer the
+#       check, a read after it, or a block's `Init` calls. A block whose own
+#       `Init` query makes D1 reset reads the same in one answer; impresspress
+#       logs it at `error` after 8 runtimes.
+#     - `backend.status` `ok`, `runtime.status` `degraded` with blocks listed
+#       in `unavailable` → rollback: D1 answered, so the listed blocks fail
+#       on their own (contention, `database.contended`, counts here).
+#     - `backend.status` `ok`, `runtime.status` `stale` → outage: a rebuild
+#       failed on something other than D1, or a cold isolate serves its
+#       version's packaged plan.
+#     - `backend.status` `ok`, `runtime.status` `degraded` with nothing
+#       listed → outage: a config read failed after the runtime was
+#       published, and no attempt has looked since.
+#     - `backend.status` `ok`, `runtime.status` `ok`, `degraded` config
+#       entries → outage (the config source failed transiently).
+#     - anything else (another `backend.status`, a 503 naming no cause) →
+#       rollback.
+#  8. Without `runtime.backend` (impresspress's native server, or a version
+#     from before the field):
+#     - `runtime.status` `stale` → outage: the runtime serves config older
+#       than the database's because a transient failure stopped its
+#       replacement (a failed rebuild, a failed check before a hand-off, a
+#       cold isolate serving its packaged plan). An outage, or rarely a block
+#       of the new version whose own `Init` resets D1.
+#     - `runtime.status` `degraded` with blocks listed while every block's
+#       config answered (`degraded` empty) → rollback, read as a block whose
+#       own `Init` keeps failing with D1 answering. An outage that begins
+#       during a block's `Init` gives the same body; `runtime.backend` is
+#       what tells them apart.
+#     - any other `degraded` → outage. One that lists no block had its
+#       variables read fail after it was published.
+#     - `runtime.status` `ok` with `degraded` config entries → outage.
+#     - anything else (a 503 naming no cause) → rollback.
+#
+# The gate judges the answer after one retry past `Retry-After`
+# (`health_gate_retry_delay`), so the attempt `backend` reports is one made
+# after the window the first answer named.
 health_gate_verdict() {
   local status=$1 headers_file=$2 body_file=$3
   if [[ "$status" == "200" ]]; then
@@ -181,15 +194,23 @@ health_gate_verdict() {
   fi
   jq -r '
     def list(f): f | type == "array";
+    def listed: ((.runtime.unavailable // []) | length) > 0;
     if (list(.ok) and list(.broken) and list(.degraded) and list(.failed)
         and (.runtime | type == "object")
         and (.runtime.status | type == "string")) | not then "rollback"
     elif (.broken | length) > 0 or (.failed | length) > 0 then "rollback"
     elif .runtime.status == "failed" then "rollback"
+    elif (.runtime.backend | type) == "object" then
+      if .runtime.backend.status == "failing" then "outage"
+      elif .runtime.backend.status != "ok" then "rollback"
+      elif .runtime.status == "degraded" then
+        if listed then "rollback" else "outage" end
+      elif .runtime.status == "stale" then "outage"
+      elif .runtime.status == "ok" and (.degraded | length) > 0 then "outage"
+      else "rollback" end
     elif .runtime.status == "stale" then "outage"
     elif .runtime.status == "degraded" then
-      if ((.runtime.unavailable // []) | length) > 0 and (.degraded | length) == 0
-      then "rollback" else "outage" end
+      if listed and (.degraded | length) == 0 then "rollback" else "outage" end
     elif .runtime.status == "ok" and (.degraded | length) > 0 then "outage"
     else "rollback" end
   ' "$body_file"

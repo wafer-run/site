@@ -6,8 +6,9 @@
 //! declaring a required key, initialized through a config source that answers
 //! as each test scripts, so its slot holds what that answer leaves (ready,
 //! retrying, failed); and, for the states only a platform knows (published
-//! degraded, stale, a failed rebuild), impresspress's platform health source,
-//! registered the way the Cloudflare entry registers its runtime cache's.
+//! degraded, stale, a failed rebuild, what the last attempt found of D1),
+//! impresspress's platform health source, registered the way the Cloudflare
+//! entry registers its runtime cache's.
 //!
 //! Every body is checked for the source's error text and the failing `Init`'s,
 //! which must stay out of this public route.
@@ -19,7 +20,7 @@ use std::{
 };
 
 use impresspress_core::runtime_health::{
-    set_platform_health_source, PlatformHealth, PlatformHealthSource, RetryEpisode,
+    set_platform_health_source, BackendCheck, PlatformHealth, PlatformHealthSource, RetryEpisode,
 };
 use wafer_block::{
     core_types::{ErrorCode, LifecycleEvent, LifecycleType, Message, WaferError},
@@ -96,9 +97,12 @@ impl ConfigSource for ScriptedSource {
                 block,
                 key: KEY.to_string(),
             }),
+            // As impresspress's D1 source answers a read that met D1's
+            // outage: `DatabaseError::detail_code()`.
             Answer::Transient => Err(ConfigError::Transient {
                 block,
                 source: Box::new(SourceErr),
+                detail_code: Some(wafer_block::wire::database::DATABASE_UNAVAILABLE.to_string()),
             }),
             Answer::SourceFault => Err(ConfigError::SourceFault {
                 block,
@@ -455,4 +459,83 @@ async fn a_failed_rebuild_rolls_back() {
     assert_eq!(h.body["runtime"]["status"], "failed");
     assert_eq!(h.body["broken"], serde_json::json!([]));
     assert_eq!(h.body["failed"], serde_json::json!([]));
+}
+
+/// What the isolate's last settled attempt found of D1, settled now.
+fn backend(answered: bool) -> Option<BackendCheck> {
+    let now = impresspress_core::util::now_millis();
+    Some(BackendCheck::after(None, answered, now - 1_000))
+}
+
+/// impresspress #287's case: D1 failed during a block's `Init` after the
+/// variables read answered, so every config read answers from the snapshot
+/// and the block is listed — but the last attempt found D1 failing. An
+/// outage: the gate keeps the version.
+#[tokio::test]
+async fn a_block_retrying_while_the_backend_fails_is_an_outage() {
+    let _platform = PlatformGuard::report(PlatformHealth {
+        episode: Some(episode(4, false)),
+        backend: backend(false),
+        ..PlatformHealth::default()
+    });
+    let h = health_with(Answer::Ok, Answer::Ok, true).await;
+    assert_eq!(h.status, "503", "{}", h.body);
+    assert_eq!(h.verdict, "outage");
+    assert_eq!(h.body["degraded"], serde_json::json!([]));
+    assert_eq!(h.body["runtime"]["status"], "degraded");
+    assert_eq!(h.body["runtime"]["backend"]["status"], "failing");
+    assert!(
+        h.body["runtime"]["backend"]["since"].is_string(),
+        "{}",
+        h.body
+    );
+    assert!(
+        h.body["runtime"]["backend"]["checked"].is_string(),
+        "{}",
+        h.body
+    );
+    assert_eq!(h.body["runtime"]["unavailable"][0]["block"], RESETTING);
+}
+
+/// The same block with D1 answering the last attempt: the block fails on
+/// its own, the version's fault.
+#[tokio::test]
+async fn a_block_retrying_while_the_backend_answers_rolls_back() {
+    let _platform = PlatformGuard::report(PlatformHealth {
+        episode: Some(episode(4, false)),
+        backend: backend(true),
+        ..PlatformHealth::default()
+    });
+    let h = health_with(Answer::Ok, Answer::Ok, true).await;
+    assert_eq!(h.status, "503", "{}", h.body);
+    assert_eq!(h.verdict, "rollback");
+    assert_eq!(h.body["runtime"]["backend"]["status"], "ok");
+    assert_eq!(h.body["runtime"]["unavailable"][0]["block"], RESETTING);
+}
+
+/// A failing backend outranks nothing: a `failed` runtime still rolls back.
+#[tokio::test]
+async fn a_failed_runtime_rolls_back_whatever_the_backend() {
+    let _platform = PlatformGuard::report(PlatformHealth {
+        episode: Some(episode(30, true)),
+        backend: backend(false),
+        ..PlatformHealth::default()
+    });
+    let h = health_with(Answer::Ok, Answer::Ok, false).await;
+    assert_eq!(h.body["runtime"]["status"], "failed", "{}", h.body);
+    assert_eq!(h.body["runtime"]["backend"]["status"], "failing");
+    assert_eq!(h.verdict, "rollback");
+}
+
+/// A healthy runtime's body stays exactly `{"status":"ok"}` under
+/// `runtime`, whatever the platform last saw.
+#[tokio::test]
+async fn an_ok_runtime_carries_no_backend() {
+    let _platform = PlatformGuard::report(PlatformHealth {
+        backend: backend(true),
+        ..PlatformHealth::default()
+    });
+    let h = health_with(Answer::Ok, Answer::Ok, false).await;
+    assert_eq!(h.status, "200", "{}", h.body);
+    assert_eq!(h.body["runtime"], serde_json::json!({"status": "ok"}));
 }
