@@ -11,7 +11,7 @@
 //!   after a 503's `Retry-After`. The health block's own answers are checked
 //!   against the gate in tests/health_unavailable.rs.
 //! - `rollback_to_previous` resolves the version a rollback returns to,
-//!   refuses one older than the rollback baseline, deploys it, and checks it
+//!   refuses one created before the rollback floor, deploys it, and checks it
 //!   went live — run against a stub `npx` that logs every call and answers
 //!   wrangler's JSON from fixtures.
 
@@ -477,7 +477,7 @@ fn backend_verdict(runtime: &str) -> String {
     verdict("503", Some("4"), &body("[]", "[]", "[]", runtime))
 }
 
-/// Rule 7, `failing`: D1 could not answer the last attempt — an outage,
+/// Rule 8, `failing`: D1 could not answer the last attempt — an outage,
 /// whatever the runtime lists (the body #282's gate rolled back).
 #[test]
 fn a_failing_backend_is_an_outage() {
@@ -516,7 +516,7 @@ fn a_failed_runtime_rolls_back_whatever_the_backend() {
     );
 }
 
-/// Rule 7, `ok`: D1 answered, so blocks still listed fail on their own.
+/// Rule 8, `ok`: D1 answered, so blocks still listed fail on their own.
 #[test]
 fn blocks_listed_while_the_backend_answers_roll_back() {
     assert_eq!(backend_verdict(&release_runtime(&[BACKEND_OK])), "rollback");
@@ -531,23 +531,29 @@ fn blocks_listed_while_the_backend_answers_roll_back() {
         ])),
         "rollback"
     );
-    // Even with a config entry the source could not answer.
-    assert_eq!(
-        verdict(
-            "503",
-            Some("4"),
-            &body(
-                "[]",
-                r#"["wafer-run/auth"]"#,
-                "[]",
-                &release_runtime(&[BACKEND_OK])
-            )
-        ),
-        "rollback"
-    );
 }
 
-/// Rule 7, `ok`: `stale`, or `degraded` with nothing listed, is an outage.
+/// Rule 7: a config entry the source could not answer, now, is an outage
+/// whatever `backend` last saw — even `ok` with blocks listed.
+#[test]
+fn a_degraded_config_entry_is_an_outage_whatever_the_backend() {
+    for runtime in [
+        release_runtime(&[BACKEND_OK]),
+        RT_RELEASE_FAILING.to_string(),
+    ] {
+        assert_eq!(
+            verdict(
+                "503",
+                Some("4"),
+                &body("[]", r#"["wafer-run/auth"]"#, "[]", &runtime)
+            ),
+            "outage",
+            "{runtime}"
+        );
+    }
+}
+
+/// Rule 8, `ok`: `stale`, or `degraded` with nothing listed, is an outage.
 #[test]
 fn stale_or_unlisted_while_the_backend_answers_is_an_outage() {
     assert_eq!(
@@ -563,7 +569,7 @@ fn stale_or_unlisted_while_the_backend_answers_is_an_outage() {
     );
 }
 
-/// Rule 7, the rest: a `backend.status` the health block never sends, or an
+/// Rule 8, the rest: a `backend.status` the health block never sends, or an
 /// `ok` runtime naming no cause, rolls back.
 #[test]
 fn other_backend_answers_roll_back() {
@@ -580,7 +586,7 @@ fn other_backend_answers_roll_back() {
     );
 }
 
-/// Rule 8: without `backend` (native, an older version) the earlier rules
+/// Rule 9: without `backend` (native, an older version) the earlier rules
 /// stand — the RELEASE example less its `backend` is a block failing with
 /// its config answering.
 #[test]
@@ -610,8 +616,8 @@ fn without_a_backend_the_earlier_rules_stand() {
     );
 }
 
-/// The rollback baseline's id, from the lib.
-const BASELINE: &str = "4c6ff923-be37-453a-a240-7c784072b76a";
+/// The lib's `ROLLBACK_FLOOR_CREATED_ON`: when 4c6ff923 was created.
+const FLOOR: &str = "2026-10-30T07:27:07.651Z";
 
 fn deployment(created_on: &str, versions: &[(&str, u32)]) -> String {
     let versions: Vec<String> = versions
@@ -647,6 +653,32 @@ fn the_rollback_target_is_the_previous_deployments_full_version() {
     assert_eq!(stdout(&out), "previous");
 }
 
+/// An earlier deployment of the live version itself (a re-promotion) is no
+/// rollback: the target is the latest deployment of another version.
+#[test]
+fn a_deployment_of_the_live_version_is_skipped() {
+    let list = deployments(&[
+        deployment("2026-11-01T10:00:00.000000Z", &[("previous", 100)]),
+        deployment("2026-11-03T10:00:00.000000Z", &[("new", 100)]),
+        deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)]),
+    ]);
+    let out = rollback_target(&list);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "previous");
+
+    let only_live = deployments(&[
+        deployment("2026-11-03T10:00:00.000000Z", &[("new", 100)]),
+        deployment("2026-11-05T10:00:00.000000Z", &[("new", 100)]),
+    ]);
+    let out = rollback_target(&only_live);
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("no earlier deployment has another version at 100%"),
+        "{}",
+        stderr(&out)
+    );
+}
+
 /// A split deployment (a gradual rollout) has no version to return to; the
 /// one before it does.
 #[test]
@@ -673,7 +705,7 @@ fn an_empty_history_has_no_target() {
         assert!(!out.status.success(), "{list}");
         assert_eq!(stdout(&out), "", "{list}");
         assert!(
-            stderr(&out).contains("no earlier deployment has a version at 100%"),
+            stderr(&out).contains("no earlier deployment has another version at 100%"),
             "{list}: {}",
             stderr(&out)
         );
@@ -770,8 +802,6 @@ esac
     }
 }
 
-const BASELINE_AT: &str = "2026-10-31T07:27:07.123456Z";
-
 fn history() -> String {
     deployments(&[
         deployment("2026-11-01T10:00:00.000000Z", &[("previous", 100)]),
@@ -787,7 +817,7 @@ fn rolled_back() -> String {
     ])
 }
 
-/// A target newer than the baseline is deployed at 100% with `versions
+/// A target newer than the floor is deployed at 100% with `versions
 /// deploy` (which never forces changed secrets back), never with `wrangler
 /// rollback`, and confirmed live.
 #[test]
@@ -795,10 +825,7 @@ fn a_rollback_deploys_the_target_and_confirms_it_is_live() {
     let w = Wrangler::new(
         &history(),
         &rolled_back(),
-        &[
-            (BASELINE, BASELINE_AT),
-            ("previous", "2026-11-01T09:59:00.5Z"),
-        ],
+        &[("previous", "2026-11-01T09:59:00.5Z")],
         0,
     );
     let out = w.rollback();
@@ -820,18 +847,15 @@ fn a_rollback_deploys_the_target_and_confirms_it_is_live() {
     assert!(!calls.iter().any(|c| c.contains(" rollback")), "{calls:#?}");
 }
 
-/// A target created before the baseline (before the reset) is refused:
-/// nothing is deployed, and the operator is told the new version is still
-/// live and to deploy forward from main.
+/// A target created before the floor (before the reset) — by a single
+/// millisecond — is refused: nothing is deployed, and the operator is told
+/// the new version is still live and to deploy forward from main.
 #[test]
-fn a_target_older_than_the_baseline_is_refused() {
+fn a_target_older_than_the_floor_is_refused() {
     let w = Wrangler::new(
         &history(),
         &history(),
-        &[
-            (BASELINE, BASELINE_AT),
-            ("previous", "2026-10-31T07:20:00.000001Z"),
-        ],
+        &[("previous", "2026-10-30T07:27:07.650999Z")],
         0,
     );
     let out = w.rollback();
@@ -841,6 +865,7 @@ fn a_target_older_than_the_baseline_is_refused() {
         err.contains("refusing to roll back to previous: it predates the 2026-10-30 reset"),
         "{err}"
     );
+    assert!(err.contains(&format!("created before {FLOOR}")), "{err}");
     assert!(err.contains("new is still live"), "{err}");
     assert!(err.contains("Deploy forward from main"), "{err}");
     let calls = w.calls();
@@ -852,14 +877,28 @@ fn a_target_older_than_the_baseline_is_refused() {
     );
 }
 
+/// The floor version itself (4c6ff923, its `created_on` carrying more
+/// digits than the floor) may be rolled back to.
+#[test]
+fn the_floor_version_itself_may_be_rolled_back_to() {
+    let w = Wrangler::new(
+        &history(),
+        &rolled_back(),
+        &[("previous", "2026-10-30T07:27:07.651234Z")],
+        0,
+    );
+    let out = w.rollback();
+    assert!(out.status.success(), "{}", stderr(&out));
+}
+
 /// A target whose creation time cannot be read is refused the same way.
 #[test]
 fn a_target_that_cannot_be_dated_is_refused() {
-    let w = Wrangler::new(&history(), &history(), &[(BASELINE, BASELINE_AT)], 0);
+    let w = Wrangler::new(&history(), &history(), &[], 0);
     let out = w.rollback();
     assert!(!out.status.success());
     assert!(
-        stderr(&out).contains("so previous is refused; new is still live"),
+        stderr(&out).contains("could not read when previous was created, so it is refused;"),
         "{}",
         stderr(&out)
     );
@@ -877,10 +916,7 @@ fn a_rollback_that_did_not_happen_is_reported() {
     let w = Wrangler::new(
         &history(),
         &history(),
-        &[
-            (BASELINE, BASELINE_AT),
-            ("previous", "2026-11-01T09:59:00Z"),
-        ],
+        &[("previous", "2026-11-01T09:59:00Z")],
         0,
     );
     let out = w.rollback();
@@ -899,10 +935,7 @@ fn a_refused_deploy_is_a_failed_rollback() {
     let w = Wrangler::new(
         &history(),
         &history(),
-        &[
-            (BASELINE, BASELINE_AT),
-            ("previous", "2026-11-01T09:59:00Z"),
-        ],
+        &[("previous", "2026-11-01T09:59:00Z")],
         1,
     );
     let out = w.rollback();

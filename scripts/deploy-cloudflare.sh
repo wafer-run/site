@@ -140,10 +140,10 @@ case "$cmd" in
     # (scripts/lib/deploy-checks.sh, the one list of its rules and why)
     # decides `healthy`, `outage` (keep the new version, report and exit
     # non-zero) or `rollback`. `rollback_to_previous` (deploy-checks.sh)
-    # returns to the version at 100% in the deployment before this one — on
-    # a first deploy the CLI's 503 placeholder — unless it predates the
-    # rollback baseline, and checks the result; either way the deploy exits
-    # non-zero.
+    # returns to the version at 100% in the latest earlier deployment of
+    # another version — on a first deploy the CLI's 503 placeholder — unless
+    # it was created before ROLLBACK_FLOOR_CREATED_ON, and checks the result;
+    # either way the deploy exits non-zero.
     # A 503 carrying `Retry-After` is asked once more after that delay (at
     # most 60 s), and only the second answer is judged: one isolate's blip
     # clears within its own window, an outage or a fault answers the same.
@@ -171,9 +171,10 @@ case "$cmd" in
           echo "$health_url: 200 — deploy complete"
           ;;
         outage)
-          echo "error: $health_url returned $status: the backend (D1) is failing, which says" >&2
-          echo "       nothing about the new version. It stays live; check D1 and the Worker" >&2
-          echo "       logs (\`./scripts/deploy-cloudflare.sh tail\`). The answer:" >&2
+          echo "error: $health_url returned $status, an outage-shaped answer (health_gate_verdict" >&2
+          echo "       in scripts/lib/deploy-checks.sh says which rule) that says nothing about" >&2
+          echo "       the new version. It stays live; check D1, KV and the Worker logs" >&2
+          echo "       (\`./scripts/deploy-cloudflare.sh tail\`). The answer:" >&2
           cat "$health_body" >&2 || true
           echo >&2
           exit 1
@@ -182,10 +183,10 @@ case "$cmd" in
           echo "error: $health_url returned $status — rolling back" >&2
           cat "$health_body" >&2 || true
           echo >&2
-          # A refused or failed rollback has printed what to do; a verified
-          # one still leaves a deploy that failed.
+          # Under `set -e` a refused or failed rollback (which has printed
+          # what to do) exits here; a verified one still failed the deploy.
           rollback_to_previous "$WRANGLER_TOML" \
-            "post-deploy /_health failed (status: $status)" || exit 1
+            "post-deploy /_health failed (status: $status)"
           exit 1
           ;;
       esac
