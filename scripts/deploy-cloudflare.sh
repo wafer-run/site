@@ -71,7 +71,7 @@ if [[ "$cmd" == "build" || "$cmd" == "deploy" ]]; then
   echo "siblings at the ci.yml pins"
 fi
 if [[ "$cmd" == "deploy" ]] && ! command -v jq >/dev/null 2>&1; then
-  echo "error: the post-deploy /_health gate needs jq" >&2
+  echo "error: the post-deploy /_health gate and its rollback need jq" >&2
   exit 1
 fi
 
@@ -137,19 +137,13 @@ case "$cmd" in
     # deploy` stops at `/_deploy/prepare` or at the candidate smoke
     # (impresspress.toml `deploy_smoke_paths`), before promotion, with the
     # live version untouched. Here, after promotion, `health_gate_verdict`
-    # (scripts/lib/deploy-checks.sh, where each rule is listed) decides:
-    #   - rollback: the new version is at fault (`broken` or `failed`
-    #     entries, a `failed` runtime, a block that keeps failing its `Init`
-    #     while D1 answers, a 500, no answer, or a body that is not the
-    #     health block's). `wrangler rollback` returns to the previous
-    #     version, which on a first deploy is the CLI's 503 placeholder;
-    #   - outage: read as D1 failing after promotion (a `degraded` or `stale`
-    #     runtime with no deploy-caused entry, or the Worker's plain-text 503
-    #     with `Retry-After`). That says nothing about the new version and
-    #     the previous one would answer the same, so keep it, report and exit
-    #     non-zero. The plain-text 503 can also be a request that waited on
-    #     another request's failed build of any class (deploy-checks.sh says
-    #     why), so the message says to check the body and the Worker logs.
+    # (scripts/lib/deploy-checks.sh, the one list of its rules and why)
+    # decides `healthy`, `outage` (keep the new version, report and exit
+    # non-zero) or `rollback`. `rollback_to_previous` (deploy-checks.sh)
+    # returns to the version at 100% in the latest earlier deployment of
+    # another version — on a first deploy the CLI's 503 placeholder — unless
+    # it was created before ROLLBACK_FLOOR_CREATED_ON, and checks the result;
+    # either way the deploy exits non-zero.
     # A 503 carrying `Retry-After` is asked once more after that delay (at
     # most 60 s), and only the second answer is judged: one isolate's blip
     # clears within its own window, an outage or a fault answers the same.
@@ -177,9 +171,10 @@ case "$cmd" in
           echo "$health_url: 200 — deploy complete"
           ;;
         outage)
-          echo "error: $health_url returned $status: the backend (D1) is failing, which says" >&2
-          echo "       nothing about the new version. It stays live; check D1 and the Worker" >&2
-          echo "       logs (\`./scripts/deploy-cloudflare.sh tail\`). The answer:" >&2
+          echo "error: $health_url returned $status, an outage-shaped answer (health_gate_verdict" >&2
+          echo "       in scripts/lib/deploy-checks.sh says which rule) that says nothing about" >&2
+          echo "       the new version. It stays live; check D1, KV and the Worker logs" >&2
+          echo "       (\`./scripts/deploy-cloudflare.sh tail\`). The answer:" >&2
           cat "$health_body" >&2 || true
           echo >&2
           exit 1
@@ -188,8 +183,10 @@ case "$cmd" in
           echo "error: $health_url returned $status — rolling back" >&2
           cat "$health_body" >&2 || true
           echo >&2
-          npx wrangler@4 rollback --config "$WRANGLER_TOML" \
-            --message "post-deploy /_health failed (status: $status)" || true
+          # Under `set -e` a refused or failed rollback (which has printed
+          # what to do) exits here; a verified one still failed the deploy.
+          rollback_to_previous "$WRANGLER_TOML" \
+            "post-deploy /_health failed (status: $status)"
           exit 1
           ;;
       esac

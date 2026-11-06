@@ -58,6 +58,12 @@ A deploy is one command. `impresspress deploy --target cloudflare` deploys the p
 
 One-time setup on a Cloudflare account: a D1 database (`npx wrangler@4 d1 create wafer-site-prod`, id into the env file as `IMPRESSPRESS_CLOUDFLARE_D1_DATABASE_ID`), an R2 bucket (`npx wrangler@4 r2 bucket create wafer-site-assets`) and the `CONFIG_CACHE` KV namespace (id in `wrangler.overrides.toml`), plus `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the env file. `.env.example`'s Cloudflare section lists them.
 
+### Rolling back
+
+The gate rolls back on anything `health_gate_verdict` (`scripts/lib/deploy-checks.sh`) does not read as healthy or as an outage: a fault the health body names (a required key unset, a config source fault, a `failed` runtime, a block that keeps failing its `Init` while its config answers), but also any status other than 200 or 503 (a 500, an Error 1102 page, curl's `000` for a timeout or no connection), a 503 that is not JSON and carries no `Retry-After`, a 503 health body that names no cause, and JSON that is not the health body. The rule list there gives each rule's reason. On Cloudflare the body's `runtime.backend` says whether D1 failed the isolate's last attempt: `failing` is an outage and keeps the new version, while blocks still failing with `backend` `ok` are the version's own fault.
+
+A rollback (`rollback_to_previous` in deploy-checks.sh) returns to the version at 100% in the deployment before the new one — the version `wrangler rollback` would pick — but deploys it with `wrangler versions deploy`, which fails rather than restoring secrets that changed since that version. It skips an earlier deployment that only re-promoted the live version, refuses a version created before `ROLLBACK_FLOOR_CREATED_ON` (2026-10-30T07:27:07.651Z, when `4c6ff923`, the first version after the 2026-10-30 reset, was created), and afterwards checks that the target is the live version. When it refuses or the rollback fails, the new version stays live: deploy forward from main. Never roll back by hand to a version created before that time.
+
 ### First admin on a fresh database
 
 On Cloudflare every setting is a row of D1's variables table, and only an admin can edit one, so a fresh database needs a first admin before anything else is configured:
